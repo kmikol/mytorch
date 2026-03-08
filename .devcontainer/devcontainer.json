@@ -1,0 +1,24 @@
+{
+    "name": "C++ ML Dev",
+    "dockerFile": "../Dockerfile",
+    "context": "..",
+    "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+
+    "customizations": {
+        "vscode": {
+            "settings": {
+                "terminal.integrated.shell.linux": "/bin/bash",
+                "cmake.configureOnOpen": false
+            },
+            "extensions": [
+                "ms-vscode.cpptools",
+                "ms-vscode.cmake-tools",
+                "twxs.cmake",
+                "ms-vscode.cpptools-extension-pack",
+                "ms-vscode.live-server"
+            ]
+        }
+    },
+    "remoteUser": "vscode"
+}
