@@ -8,4 +8,6 @@
 #include "matmul.h"
 #include "add.h"
 
+#include "softmax.h"
+
 

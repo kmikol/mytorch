@@ -3,7 +3,7 @@
 #include "ops/ops.h"
 
 
-Tensor mse_loss(const Tensor& pred, const Tensor& target) {
+inline Tensor mse_loss(const Tensor& pred, const Tensor& target) {
 
     assert(pred.ndim() == 2 && target.ndim() == 2);
     assert(pred.shape(0) == target.shape(0));

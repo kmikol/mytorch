@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include "tensorlib.h"
 #include "ops/ops.h"
-#include "loss_functions/loss_functions.h"
+#include "loss_functions/mse.h"
 
 // ════════════════════════════════════════════════════════════════════════════
 // MSE Loss Unit Tests
