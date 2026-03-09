@@ -23,7 +23,7 @@ struct Linear {
         W = Tensor::zeros({out_features, in_features}, /*requires_grad=*/true);
         for (int64_t r = 0; r < out_features; r++)
             for (int64_t c = 0; c < in_features; c++)
-                W.at({r, c}) = dist(global_rng);
+                W.at(r, c) = dist(global_rng);
 
         // bias starts at zero — common practice
         // also requires_grad so it gets updated too

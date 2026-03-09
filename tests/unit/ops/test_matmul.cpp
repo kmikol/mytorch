@@ -84,10 +84,10 @@ TEST(MatMulOpForward, ComputesCorrect2x3by3x2Product) {
     Tensor matrix_b = Tensor::from_data({7, 8, 9, 10, 11, 12},    {3, 2});
     Tensor result   = MatMulOp::forward(matrix_a, matrix_b);
 
-    EXPECT_FLOAT_EQ(result.at({0, 0}),  58.f);
-    EXPECT_FLOAT_EQ(result.at({0, 1}),  64.f);
-    EXPECT_FLOAT_EQ(result.at({1, 0}), 139.f);
-    EXPECT_FLOAT_EQ(result.at({1, 1}), 154.f);
+    EXPECT_FLOAT_EQ(result.at(0, 0),  58.f);
+    EXPECT_FLOAT_EQ(result.at(0, 1),  64.f);
+    EXPECT_FLOAT_EQ(result.at(1, 0), 139.f);
+    EXPECT_FLOAT_EQ(result.at(1, 1), 154.f);
 }
 
 TEST(MatMulOpForward, MultiplyByIdentityLeavesMatrixUnchanged) {
@@ -103,7 +103,7 @@ TEST(MatMulOpForward, MultiplyByIdentityLeavesMatrixUnchanged) {
 
     for (int64_t row = 0; row < 3; ++row) {
         for (int64_t col = 0; col < 3; ++col) {
-            EXPECT_FLOAT_EQ(result.at({row, col}), matrix_x.at({row, col}))
+            EXPECT_FLOAT_EQ(result.at(row, col), matrix_x.at(row, col))
                 << "mismatch at [" << row << ", " << col << "]";
         }
     }
@@ -116,7 +116,7 @@ TEST(MatMulOpForward, MultiplyByZeroMatrixProducesAllZeros) {
 
     for (int64_t row = 0; row < 2; ++row) {
         for (int64_t col = 0; col < 2; ++col) {
-            EXPECT_FLOAT_EQ(result.at({row, col}), 0.f)
+            EXPECT_FLOAT_EQ(result.at(row, col), 0.f)
                 << "expected 0 at [" << row << ", " << col << "]";
         }
     }
@@ -130,8 +130,8 @@ TEST(MatMulOpForward, ComputesCorrectColumnVectorProduct) {
     Tensor vector_v = Tensor::from_data({1, 2, 3},           {3, 1});
     Tensor result   = MatMulOp::forward(matrix_a, vector_v);
 
-    EXPECT_FLOAT_EQ(result.at({0, 0}), 14.f);
-    EXPECT_FLOAT_EQ(result.at({1, 0}), 32.f);
+    EXPECT_FLOAT_EQ(result.at(0, 0), 14.f);
+    EXPECT_FLOAT_EQ(result.at(1, 0), 32.f);
 }
 
 TEST(MatMulOpForward, OutputIsAlwaysContiguous) {
@@ -161,10 +161,10 @@ TEST(MatMulForwardFastPath, BothInputsContiguous) {
 
     Tensor result = MatMulOp::forward(matrix_a, matrix_b);
 
-    EXPECT_FLOAT_EQ(result.at({0, 0}),  58.f);
-    EXPECT_FLOAT_EQ(result.at({0, 1}),  64.f);
-    EXPECT_FLOAT_EQ(result.at({1, 0}), 139.f);
-    EXPECT_FLOAT_EQ(result.at({1, 1}), 154.f);
+    EXPECT_FLOAT_EQ(result.at(0, 0),  58.f);
+    EXPECT_FLOAT_EQ(result.at(0, 1),  64.f);
+    EXPECT_FLOAT_EQ(result.at(1, 0), 139.f);
+    EXPECT_FLOAT_EQ(result.at(1, 1), 154.f);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -193,10 +193,10 @@ TEST(MatMulForwardSlowPath, NonContiguousFirstInput) {
 
     Tensor result = MatMulOp::forward(transposed_a, identity);
 
-    EXPECT_FLOAT_EQ(result.at({0, 0}), 1.f);
-    EXPECT_FLOAT_EQ(result.at({0, 1}), 2.f);
-    EXPECT_FLOAT_EQ(result.at({1, 0}), 3.f);
-    EXPECT_FLOAT_EQ(result.at({1, 1}), 4.f);
+    EXPECT_FLOAT_EQ(result.at(0, 0), 1.f);
+    EXPECT_FLOAT_EQ(result.at(0, 1), 2.f);
+    EXPECT_FLOAT_EQ(result.at(1, 0), 3.f);
+    EXPECT_FLOAT_EQ(result.at(1, 1), 4.f);
 }
 
 TEST(MatMulForwardSlowPath, NonContiguousSecondInput) {
@@ -210,10 +210,10 @@ TEST(MatMulForwardSlowPath, NonContiguousSecondInput) {
     // I @ B^T = B^T
     Tensor result = MatMulOp::forward(identity, transposed_b);
 
-    EXPECT_FLOAT_EQ(result.at({0, 0}), matrix_b.at({0, 0}));
-    EXPECT_FLOAT_EQ(result.at({0, 1}), matrix_b.at({1, 0}));
-    EXPECT_FLOAT_EQ(result.at({1, 0}), matrix_b.at({0, 1}));
-    EXPECT_FLOAT_EQ(result.at({1, 1}), matrix_b.at({1, 1}));
+    EXPECT_FLOAT_EQ(result.at(0, 0), matrix_b.at(0, 0));
+    EXPECT_FLOAT_EQ(result.at(0, 1), matrix_b.at(1, 0));
+    EXPECT_FLOAT_EQ(result.at(1, 0), matrix_b.at(0, 1));
+    EXPECT_FLOAT_EQ(result.at(1, 1), matrix_b.at(1, 1));
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -245,8 +245,8 @@ TEST(MatMulForwardBothPaths, FastAndSlowProduceIdenticalResults) {
     // transposed_c has the same logical values as matrix_a
     for (int64_t row = 0; row < 2; ++row) {
         for (int64_t col = 0; col < 2; ++col) {
-            EXPECT_FLOAT_EQ(slow_result.at({row, col}),
-                            fast_result.at({row, col}))
+            EXPECT_FLOAT_EQ(slow_result.at(row, col),
+                            fast_result.at(row, col))
                 << "fast/slow disagreement at [" << row << ", " << col << "]";
         }
     }
@@ -290,12 +290,12 @@ TEST(MatMulOpBackward, GradientForAIsCorrect) {
         upstream_grad, saved_a, saved_b, true, true);
 
     // dA = [[1],[1]] @ [[1,2,3]] = [[1,2,3],[1,2,3]]
-    EXPECT_FLOAT_EQ(gradients[0].at({0, 0}), 1.f);
-    EXPECT_FLOAT_EQ(gradients[0].at({0, 1}), 2.f);
-    EXPECT_FLOAT_EQ(gradients[0].at({0, 2}), 3.f);
-    EXPECT_FLOAT_EQ(gradients[0].at({1, 0}), 1.f);
-    EXPECT_FLOAT_EQ(gradients[0].at({1, 1}), 2.f);
-    EXPECT_FLOAT_EQ(gradients[0].at({1, 2}), 3.f);
+    EXPECT_FLOAT_EQ(gradients[0].at(0, 0), 1.f);
+    EXPECT_FLOAT_EQ(gradients[0].at(0, 1), 2.f);
+    EXPECT_FLOAT_EQ(gradients[0].at(0, 2), 3.f);
+    EXPECT_FLOAT_EQ(gradients[0].at(1, 0), 1.f);
+    EXPECT_FLOAT_EQ(gradients[0].at(1, 1), 2.f);
+    EXPECT_FLOAT_EQ(gradients[0].at(1, 2), 3.f);
 }
 
 TEST(MatMulOpBackward, GradientForBIsCorrect) {
@@ -307,9 +307,9 @@ TEST(MatMulOpBackward, GradientForBIsCorrect) {
         upstream_grad, saved_a, saved_b, true, true);
 
     // dB = A^T @ G = [[1+4],[2+5],[3+6]] = [[5],[7],[9]]
-    EXPECT_FLOAT_EQ(gradients[1].at({0, 0}), 5.f);
-    EXPECT_FLOAT_EQ(gradients[1].at({1, 0}), 7.f);
-    EXPECT_FLOAT_EQ(gradients[1].at({2, 0}), 9.f);
+    EXPECT_FLOAT_EQ(gradients[1].at(0, 0), 5.f);
+    EXPECT_FLOAT_EQ(gradients[1].at(1, 0), 7.f);
+    EXPECT_FLOAT_EQ(gradients[1].at(2, 0), 9.f);
 }
 
 TEST(MatMulOpBackward, GradientForAIsEmptyWhenNotRequired) {
@@ -435,12 +435,12 @@ TEST(MatMulBackwardValues, GradientAccumulatesOnAAfterBackward) {
     backward(result);
 
     ASSERT_TRUE(matrix_a.has_grad());
-    EXPECT_FLOAT_EQ(matrix_a.grad().at({0, 0}), 1.f);
-    EXPECT_FLOAT_EQ(matrix_a.grad().at({0, 1}), 2.f);
-    EXPECT_FLOAT_EQ(matrix_a.grad().at({0, 2}), 3.f);
-    EXPECT_FLOAT_EQ(matrix_a.grad().at({1, 0}), 1.f);
-    EXPECT_FLOAT_EQ(matrix_a.grad().at({1, 1}), 2.f);
-    EXPECT_FLOAT_EQ(matrix_a.grad().at({1, 2}), 3.f);
+    EXPECT_FLOAT_EQ(matrix_a.grad().at(0, 0), 1.f);
+    EXPECT_FLOAT_EQ(matrix_a.grad().at(0, 1), 2.f);
+    EXPECT_FLOAT_EQ(matrix_a.grad().at(0, 2), 3.f);
+    EXPECT_FLOAT_EQ(matrix_a.grad().at(1, 0), 1.f);
+    EXPECT_FLOAT_EQ(matrix_a.grad().at(1, 1), 2.f);
+    EXPECT_FLOAT_EQ(matrix_a.grad().at(1, 2), 3.f);
 }
 
 TEST(MatMulBackwardValues, GradientAccumulatesOnBAfterBackward) {
@@ -451,9 +451,9 @@ TEST(MatMulBackwardValues, GradientAccumulatesOnBAfterBackward) {
     backward(result);
 
     ASSERT_TRUE(matrix_b.has_grad());
-    EXPECT_FLOAT_EQ(matrix_b.grad().at({0, 0}), 5.f);
-    EXPECT_FLOAT_EQ(matrix_b.grad().at({1, 0}), 7.f);
-    EXPECT_FLOAT_EQ(matrix_b.grad().at({2, 0}), 9.f);
+    EXPECT_FLOAT_EQ(matrix_b.grad().at(0, 0), 5.f);
+    EXPECT_FLOAT_EQ(matrix_b.grad().at(1, 0), 7.f);
+    EXPECT_FLOAT_EQ(matrix_b.grad().at(2, 0), 9.f);
 }
 
 TEST(MatMulBackwardValues, OnlyAReceivesGradWhenOnlyARequiresIt) {
@@ -503,8 +503,8 @@ TEST(MatMulBackwardValues, SavedTensorsAreNotAliasedToInputs) {
     Tensor result   = matmul(matrix_a, matrix_b);
 
     // mutate inputs after forward but before backward
-    matrix_a.at({0, 0}) = 999.f;
-    matrix_b.at({0, 0}) = 999.f;
+    matrix_a.at(0, 0) = 999.f;
+    matrix_b.at(0, 0) = 999.f;
 
     // backward must still produce gradients based on the original values,
     // not the mutated ones — so it must not throw or produce NaN/Inf

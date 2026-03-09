@@ -39,7 +39,7 @@ struct CrossEntropyLossOp {
             // step 1: find max logit for this sample — stability trick
             float max_val = -std::numeric_limits<float>::infinity();
             for (int64_t c = 0; c < C; c++) {
-                float v = logits.at({c, n});
+                float v = logits.at(c, n);
                 if (v > max_val) max_val = v;
             }
 
@@ -48,7 +48,7 @@ struct CrossEntropyLossOp {
             // all other terms <= 1, so no overflow
             float sum_exp = 0.f;
             for (int64_t c = 0; c < C; c++)
-                sum_exp += std::exp(logits.at({c, n}) - max_val);
+                sum_exp += std::exp(logits.at(c, n) - max_val);
 
             // log(sum_exp) + max_val = log(sum(exp(logits)))
             // the max_val we subtracted earlier is added back here
@@ -56,10 +56,10 @@ struct CrossEntropyLossOp {
 
             // step 3: NLL for this sample
             // loss = -logits[target] + log(sum(exp(logits)))
-            int64_t t = (int64_t)targets.at({0, n});
+            int64_t t = (int64_t)targets.at(0, n);
             assert(t >= 0 && t < C && "target class index out of range");
 
-            total_loss += -logits.at({t, n}) + log_normaliser;
+            total_loss += -logits.at(t, n) + log_normaliser;
         }
 
         // mean over batch
@@ -91,7 +91,7 @@ struct CrossEntropyLossOp {
         int64_t C = saved_logits.shape(0);
         int64_t N = saved_logits.shape(1);
 
-        float upstream = grad.at({0, 0});
+        float upstream = grad.at(0, 0);
 
         // recompute softmax probabilities from saved logits
         // same numerically stable computation as forward
@@ -100,17 +100,17 @@ struct CrossEntropyLossOp {
         for (int64_t n = 0; n < N; n++) {
             float max_val = -std::numeric_limits<float>::infinity();
             for (int64_t c = 0; c < C; c++) {
-                float v = saved_logits.at({c, n});
+                float v = saved_logits.at(c, n);
                 if (v > max_val) max_val = v;
             }
             float sum_exp = 0.f;
             for (int64_t c = 0; c < C; c++) {
-                float e = std::exp(saved_logits.at({c, n}) - max_val);
-                probs.at({c, n}) = e;
+                float e = std::exp(saved_logits.at(c, n) - max_val);
+                probs.at(c, n) = e;
                 sum_exp += e;
             }
             for (int64_t c = 0; c < C; c++)
-                probs.at({c, n}) /= sum_exp;
+                probs.at(c, n) /= sum_exp;
         }
 
         // gradient = (softmax - one_hot) / N * upstream
@@ -118,16 +118,16 @@ struct CrossEntropyLossOp {
         Tensor d_logits = probs.clone();
 
         for (int64_t n = 0; n < N; n++) {
-            int64_t t = (int64_t)saved_targets.at({0, n});
+            int64_t t = (int64_t)saved_targets.at(0, n);
             // one_hot contribution: subtract 1 at the correct class
-            d_logits.at({t, n}) -= 1.f;
+            d_logits.at(t, n) -= 1.f;
         }
 
         // scale by 1/N (from the mean) and the upstream gradient
         float scale = upstream / (float)N;
         for (int64_t c = 0; c < C; c++)
             for (int64_t n = 0; n < N; n++)
-                d_logits.at({c, n}) *= scale;
+                d_logits.at(c, n) *= scale;
 
         // targets never require grad — class indices are not differentiable
         return {d_logits};

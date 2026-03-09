@@ -16,7 +16,7 @@ inline Tensor mse_loss(const Tensor& pred, const Tensor& target) {
     float sum = 0.f;
     for (int64_t r = 0; r < rows; r++) {
         for (int64_t c = 0; c < cols; c++) {
-            float diff = pred.at({r, c}) - target.at({r, c});
+            float diff = pred.at(r, c) - target.at(r, c);
             sum += diff * diff;
         }
     }
@@ -36,14 +36,14 @@ inline Tensor mse_loss(const Tensor& pred, const Tensor& target) {
             (const Tensor& grad) -> std::vector<Tensor> {
 
                 // grad is [1,1] — a single upstream scalar
-                float upstream = grad.at({0, 0});
+                float upstream = grad.at(0, 0);
 
                 Tensor dpred = Tensor::zeros({rows, cols});
 
                 for (int64_t r = 0; r < rows; r++) {
                     for (int64_t c = 0; c < cols; c++) {
-                        float diff = saved_pred.at({r, c}) - saved_target.at({r, c});
-                        dpred.at({r, c}) = upstream * 2.f * diff / n;
+                        float diff = saved_pred.at(r, c) - saved_target.at(r, c);
+                        dpred.at(r, c) = upstream * 2.f * diff / n;
                     }
                 }
 

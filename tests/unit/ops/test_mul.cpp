@@ -31,10 +31,10 @@ TEST(MulOpForward, ComputesCorrectValues) {
 
     Tensor C = MulOp::forward(A,B);
 
-    EXPECT_FLOAT_EQ(C.at({0,0}),5.f);
-    EXPECT_FLOAT_EQ(C.at({0,1}),12.f);
-    EXPECT_FLOAT_EQ(C.at({1,0}),21.f);
-    EXPECT_FLOAT_EQ(C.at({1,1}),32.f);
+    EXPECT_FLOAT_EQ(C.at(0,0),5.f);
+    EXPECT_FLOAT_EQ(C.at(0,1),12.f);
+    EXPECT_FLOAT_EQ(C.at(1,0),21.f);
+    EXPECT_FLOAT_EQ(C.at(1,1),32.f);
 }
 
 TEST(MulOpForward, MultiplyByZeroProducesZero) {
@@ -45,7 +45,7 @@ TEST(MulOpForward, MultiplyByZeroProducesZero) {
 
     for(int r=0;r<2;r++)
         for(int c=0;c<2;c++)
-            EXPECT_FLOAT_EQ(C.at({r,c}),0.f);
+            EXPECT_FLOAT_EQ(C.at(r,c),0.f);
 }
 
 TEST(MulOpForward, MultiplyByOneLeavesTensorUnchanged) {
@@ -56,7 +56,7 @@ TEST(MulOpForward, MultiplyByOneLeavesTensorUnchanged) {
 
     for(int r=0;r<2;r++)
         for(int c=0;c<2;c++)
-            EXPECT_FLOAT_EQ(C.at({r,c}),A.at({r,c}));
+            EXPECT_FLOAT_EQ(C.at(r,c),A.at(r,c));
 }
 
 TEST(MulOpForward, OutputIsContiguous) {
@@ -82,7 +82,7 @@ TEST(MulForwardFastPath, BothInputsContiguous) {
 
     Tensor C = MulOp::forward(A,B);
 
-    EXPECT_FLOAT_EQ(C.at({1,1}),32.f);
+    EXPECT_FLOAT_EQ(C.at(1,1),32.f);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -100,8 +100,8 @@ TEST(MulForwardSlowPath, NonContiguousInput) {
 
     Tensor C = MulOp::forward(AT,B);
 
-    EXPECT_FLOAT_EQ(C.at({0,0}),1*5);
-    EXPECT_FLOAT_EQ(C.at({1,1}),4*8);
+    EXPECT_FLOAT_EQ(C.at(0,0),1*5);
+    EXPECT_FLOAT_EQ(C.at(1,1),4*8);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -127,10 +127,10 @@ TEST(MulOpBackward, GradientForAIsGradTimesB) {
 
     auto g = MulOp::backward(grad,A,B,true,true);
 
-    EXPECT_FLOAT_EQ(g[0].at({0,0}),5.f);
-    EXPECT_FLOAT_EQ(g[0].at({0,1}),6.f);
-    EXPECT_FLOAT_EQ(g[0].at({1,0}),7.f);
-    EXPECT_FLOAT_EQ(g[0].at({1,1}),8.f);
+    EXPECT_FLOAT_EQ(g[0].at(0,0),5.f);
+    EXPECT_FLOAT_EQ(g[0].at(0,1),6.f);
+    EXPECT_FLOAT_EQ(g[0].at(1,0),7.f);
+    EXPECT_FLOAT_EQ(g[0].at(1,1),8.f);
 }
 
 TEST(MulOpBackward, GradientForBIsGradTimesA) {
@@ -141,10 +141,10 @@ TEST(MulOpBackward, GradientForBIsGradTimesA) {
 
     auto g = MulOp::backward(grad,A,B,true,true);
 
-    EXPECT_FLOAT_EQ(g[1].at({0,0}),1.f);
-    EXPECT_FLOAT_EQ(g[1].at({0,1}),2.f);
-    EXPECT_FLOAT_EQ(g[1].at({1,0}),3.f);
-    EXPECT_FLOAT_EQ(g[1].at({1,1}),4.f);
+    EXPECT_FLOAT_EQ(g[1].at(0,0),1.f);
+    EXPECT_FLOAT_EQ(g[1].at(0,1),2.f);
+    EXPECT_FLOAT_EQ(g[1].at(1,0),3.f);
+    EXPECT_FLOAT_EQ(g[1].at(1,1),4.f);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -187,8 +187,8 @@ TEST(MulBackwardValues, GradientAccumulatesOnInputs) {
     ASSERT_TRUE(A.has_grad());
     ASSERT_TRUE(B.has_grad());
 
-    EXPECT_FLOAT_EQ(A.grad().at({0,0}),5.f);
-    EXPECT_FLOAT_EQ(B.grad().at({0,0}),1.f);
+    EXPECT_FLOAT_EQ(A.grad().at(0,0),5.f);
+    EXPECT_FLOAT_EQ(B.grad().at(0,0),1.f);
 }
 
 TEST(MulBackwardValues, GradientShapeMatchesInputs) {

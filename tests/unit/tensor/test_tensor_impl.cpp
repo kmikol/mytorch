@@ -198,13 +198,13 @@ TEST_F(TensorImplTest, StoragePointerMatchesSuppliedStorage) {
 TEST_F(TensorImplTest, ReadFirstElementOf2DTensor) {
     TensorImpl tensor_impl(storage_2d, {3, 4}, {4, 1});
     // offset = 0*4 + 0*1 = 0 → value = 0.f
-    EXPECT_FLOAT_EQ(tensor_impl.at({0, 0}), 0.f);
+    EXPECT_FLOAT_EQ(tensor_impl.at(0, 0), 0.f);
 }
 
 TEST_F(TensorImplTest, ReadLastElementOf2DTensor) {
     TensorImpl tensor_impl(storage_2d, {3, 4}, {4, 1});
     // offset = 2*4 + 3*1 = 11 → value = 11.f
-    EXPECT_FLOAT_EQ(tensor_impl.at({2, 3}), 11.f);
+    EXPECT_FLOAT_EQ(tensor_impl.at(2, 3), 11.f);
 }
 
 TEST_F(TensorImplTest, ReadStartOfSecondRowIn2DTensor) {
@@ -212,27 +212,27 @@ TEST_F(TensorImplTest, ReadStartOfSecondRowIn2DTensor) {
     // Moving from row 0 to row 1 must skip exactly 4 elements.
     TensorImpl tensor_impl(storage_2d, {3, 4}, {4, 1});
     // offset = 1*4 + 0*1 = 4 → value = 4.f
-    EXPECT_FLOAT_EQ(tensor_impl.at({1, 0}), 4.f);
+    EXPECT_FLOAT_EQ(tensor_impl.at(1, 0), 4.f);
 }
 
 TEST_F(TensorImplTest, ReadInteriorElementOf2DTensor) {
     TensorImpl tensor_impl(storage_2d, {3, 4}, {4, 1});
     // offset = 2*4 + 1*1 = 9 → value = 9.f
-    EXPECT_FLOAT_EQ(tensor_impl.at({2, 1}), 9.f);
+    EXPECT_FLOAT_EQ(tensor_impl.at(2, 1), 9.f);
     // offset = 1*4 + 3*1 = 7 → value = 7.f
-    EXPECT_FLOAT_EQ(tensor_impl.at({1, 3}), 7.f);
+    EXPECT_FLOAT_EQ(tensor_impl.at(1, 3), 7.f);
 }
 
 TEST_F(TensorImplTest, ReadFirstElementOf3DTensor) {
     TensorImpl tensor_impl(storage_3d, {2, 3, 4}, {12, 4, 1});
     // offset = 0*12 + 0*4 + 0*1 = 0 → value = 0.f
-    EXPECT_FLOAT_EQ(tensor_impl.at({0, 0, 0}), 0.f);
+    EXPECT_FLOAT_EQ(tensor_impl.at(0, 0, 0), 0.f);
 }
 
 TEST_F(TensorImplTest, ReadLastElementOf3DTensor) {
     TensorImpl tensor_impl(storage_3d, {2, 3, 4}, {12, 4, 1});
     // offset = 1*12 + 2*4 + 3*1 = 23 → value = 23.f
-    EXPECT_FLOAT_EQ(tensor_impl.at({1, 2, 3}), 23.f);
+    EXPECT_FLOAT_EQ(tensor_impl.at(1, 2, 3), 23.f);
 }
 
 TEST_F(TensorImplTest, ReadStartOfSecondBatchIn3DTensor) {
@@ -240,15 +240,15 @@ TEST_F(TensorImplTest, ReadStartOfSecondBatchIn3DTensor) {
     // Moving from batch 0 to batch 1 must skip 3*4 = 12 elements.
     TensorImpl tensor_impl(storage_3d, {2, 3, 4}, {12, 4, 1});
     // offset = 1*12 + 0*4 + 0*1 = 12 → value = 12.f
-    EXPECT_FLOAT_EQ(tensor_impl.at({1, 0, 0}), 12.f);
+    EXPECT_FLOAT_EQ(tensor_impl.at(1, 0, 0), 12.f);
 }
 
 TEST_F(TensorImplTest, ReadInteriorElementOf3DTensor) {
     TensorImpl tensor_impl(storage_3d, {2, 3, 4}, {12, 4, 1});
     // offset = 0*12 + 1*4 + 2*1 = 6 → value = 6.f
-    EXPECT_FLOAT_EQ(tensor_impl.at({0, 1, 2}),  6.f);
+    EXPECT_FLOAT_EQ(tensor_impl.at(0, 1, 2),  6.f);
     // offset = 1*12 + 1*4 + 1*1 = 17 → value = 17.f
-    EXPECT_FLOAT_EQ(tensor_impl.at({1, 1, 1}), 17.f);
+    EXPECT_FLOAT_EQ(tensor_impl.at(1, 1, 1), 17.f);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -265,7 +265,7 @@ TEST_F(TensorImplTest, ReadInteriorElementOf3DTensor) {
 
 TEST_F(TensorImplTest, WriteUpdatesCorrectFlatIndexInStorage2D) {
     TensorImpl tensor_impl(storage_2d, {3, 4}, {4, 1});
-    tensor_impl.at({1, 2}) = 99.f;
+    tensor_impl.at(1, 2) = 99.f;
 
     // The write must land at flat index 1*4+2 = 6 in the raw storage buffer,
     // not just somewhere that at() happens to read back correctly later.
@@ -274,13 +274,13 @@ TEST_F(TensorImplTest, WriteUpdatesCorrectFlatIndexInStorage2D) {
 
 TEST_F(TensorImplTest, WriteReadbackRoundTrip2D) {
     TensorImpl tensor_impl(storage_2d, {3, 4}, {4, 1});
-    tensor_impl.at({0, 3}) = 42.f;
-    EXPECT_FLOAT_EQ(tensor_impl.at({0, 3}), 42.f);
+    tensor_impl.at(0, 3) = 42.f;
+    EXPECT_FLOAT_EQ(tensor_impl.at(0, 3), 42.f);
 }
 
 TEST_F(TensorImplTest, WriteUpdatesCorrectFlatIndexInStorage3D) {
     TensorImpl tensor_impl(storage_3d, {2, 3, 4}, {12, 4, 1});
-    tensor_impl.at({1, 1, 1}) = 77.f;
+    tensor_impl.at(1, 1, 1) = 77.f;
 
     // flat index = 1*12 + 1*4 + 1 = 17
     EXPECT_FLOAT_EQ(storage_3d->ptr()[17], 77.f);
@@ -288,18 +288,18 @@ TEST_F(TensorImplTest, WriteUpdatesCorrectFlatIndexInStorage3D) {
 
 TEST_F(TensorImplTest, WriteReadbackRoundTrip3D) {
     TensorImpl tensor_impl(storage_3d, {2, 3, 4}, {12, 4, 1});
-    tensor_impl.at({0, 2, 3}) = 55.f;
-    EXPECT_FLOAT_EQ(tensor_impl.at({0, 2, 3}), 55.f);
+    tensor_impl.at(0, 2, 3) = 55.f;
+    EXPECT_FLOAT_EQ(tensor_impl.at(0, 2, 3), 55.f);
 }
 
 TEST_F(TensorImplTest, WriteDoesNotCorruptAdjacentElements) {
     // Writing to one element must not touch its neighbours in flat storage.
     // This catches off-by-one errors in the stride calculation.
     TensorImpl tensor_impl(storage_2d, {3, 4}, {4, 1});
-    tensor_impl.at({1, 1}) = 999.f;    // flat index 5
+    tensor_impl.at(1, 1) = 999.f;    // flat index 5
 
-    EXPECT_FLOAT_EQ(tensor_impl.at({1, 0}), 4.f);   // flat index 4 — before
-    EXPECT_FLOAT_EQ(tensor_impl.at({1, 2}), 6.f);   // flat index 6 — after
+    EXPECT_FLOAT_EQ(tensor_impl.at(1, 0), 4.f);   // flat index 4 — before
+    EXPECT_FLOAT_EQ(tensor_impl.at(1, 2), 6.f);   // flat index 6 — after
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -315,11 +315,11 @@ TEST_F(TensorImplTest, TwoViewsOverSameStorageSeeEachOthersWrites) {
     TensorImpl view_a(storage_2d, {3, 4}, {4, 1});
     TensorImpl view_b(storage_2d, {3, 4}, {4, 1});
 
-    view_a.at({0, 0}) = 123.f;
+    view_a.at(0, 0) = 123.f;
 
     // view_b was not written to directly, but it shares storage_2d,
     // so the value must be visible through it immediately.
-    EXPECT_FLOAT_EQ(view_b.at({0, 0}), 123.f);
+    EXPECT_FLOAT_EQ(view_b.at(0, 0), 123.f);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -355,14 +355,14 @@ TEST(TensorImplTransposedStrides, ReadAccessWithSwappedStrides) {
     TensorImpl transposed_view(storage, {3, 2}, {1, 3});
 
     // First column of tT = first row of original = {0, 1, 2}
-    EXPECT_FLOAT_EQ(transposed_view.at({0, 0}), 0.f);
-    EXPECT_FLOAT_EQ(transposed_view.at({1, 0}), 1.f);
-    EXPECT_FLOAT_EQ(transposed_view.at({2, 0}), 2.f);
+    EXPECT_FLOAT_EQ(transposed_view.at(0, 0), 0.f);
+    EXPECT_FLOAT_EQ(transposed_view.at(1, 0), 1.f);
+    EXPECT_FLOAT_EQ(transposed_view.at(2, 0), 2.f);
 
     // Second column of tT = second row of original = {3, 4, 5}
-    EXPECT_FLOAT_EQ(transposed_view.at({0, 1}), 3.f);
-    EXPECT_FLOAT_EQ(transposed_view.at({1, 1}), 4.f);
-    EXPECT_FLOAT_EQ(transposed_view.at({2, 1}), 5.f);
+    EXPECT_FLOAT_EQ(transposed_view.at(0, 1), 3.f);
+    EXPECT_FLOAT_EQ(transposed_view.at(1, 1), 4.f);
+    EXPECT_FLOAT_EQ(transposed_view.at(2, 1), 5.f);
 }
 
 TEST(TensorImplTransposedStrides, WriteGoesToCorrectFlatIndexViaTransposedStrides) {
@@ -370,11 +370,11 @@ TEST(TensorImplTransposedStrides, WriteGoesToCorrectFlatIndexViaTransposedStride
     TensorImpl transposed_view(storage, {3, 2}, {1, 3});
 
     // tT[1, 0] = storage[1*1 + 0*3] = storage[1]
-    transposed_view.at({1, 0}) = 99.f;
+    transposed_view.at(1, 0) = 99.f;
     EXPECT_FLOAT_EQ(storage->ptr()[1], 99.f);
 
     // tT[0, 1] = storage[0*1 + 1*3] = storage[3]
-    transposed_view.at({0, 1}) = 77.f;
+    transposed_view.at(0, 1) = 77.f;
     EXPECT_FLOAT_EQ(storage->ptr()[3], 77.f);
 }
 
@@ -388,8 +388,8 @@ TEST(TensorImplTransposedStrides, WriteThroughTransposedViewVisibleViaOriginalSt
     TensorImpl transposed_view(storage,   {3, 2}, {1, 3});
 
     // Write to original[0, 1] — flat index = 0*3 + 1 = 1
-    original_view.at({0, 1}) = 55.f;
+    original_view.at(0, 1) = 55.f;
 
     // The transposed view of that same element is tT[1, 0] = storage[1*1 + 0*3] = storage[1]
-    EXPECT_FLOAT_EQ(transposed_view.at({1, 0}), 55.f);
+    EXPECT_FLOAT_EQ(transposed_view.at(1, 0), 55.f);
 }

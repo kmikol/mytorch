@@ -71,12 +71,12 @@ TEST(ContiguousOpForward, OutputValuesMatchLogicalLayoutOfInput) {
     Tensor transposed = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3}).transpose();
     Tensor output = ContiguousOp::forward(transposed);
 
-    EXPECT_FLOAT_EQ(output.at({0, 0}), 1.f);
-    EXPECT_FLOAT_EQ(output.at({0, 1}), 4.f);
-    EXPECT_FLOAT_EQ(output.at({1, 0}), 2.f);
-    EXPECT_FLOAT_EQ(output.at({1, 1}), 5.f);
-    EXPECT_FLOAT_EQ(output.at({2, 0}), 3.f);
-    EXPECT_FLOAT_EQ(output.at({2, 1}), 6.f);
+    EXPECT_FLOAT_EQ(output.at(0, 0), 1.f);
+    EXPECT_FLOAT_EQ(output.at(0, 1), 4.f);
+    EXPECT_FLOAT_EQ(output.at(1, 0), 2.f);
+    EXPECT_FLOAT_EQ(output.at(1, 1), 5.f);
+    EXPECT_FLOAT_EQ(output.at(2, 0), 3.f);
+    EXPECT_FLOAT_EQ(output.at(2, 1), 6.f);
 }
 
 TEST(ContiguousOpForward, OutputHasFreshStorageNotSharedWithInput) {
@@ -140,8 +140,8 @@ TEST(ContiguousOpForward, WorksCorrectlyOn3DInput) {
     for (int64_t d0 = 0; d0 < output.shape(0); ++d0) {
         for (int64_t d1 = 0; d1 < output.shape(1); ++d1) {
             for (int64_t d2 = 0; d2 < output.shape(2); ++d2) {
-                EXPECT_FLOAT_EQ(output.at({d0, d1, d2}),
-                                transposed.at({d0, d1, d2}))
+                EXPECT_FLOAT_EQ(output.at(d0, d1, d2),
+                                transposed.at(d0, d1, d2))
                     << "mismatch at [" << d0 << "," << d1 << "," << d2 << "]";
             }
         }
@@ -170,10 +170,10 @@ TEST(ContiguousOpBackward, GradientValuesAreIdenticalToIncomingGradient) {
     Tensor incoming_gradient = Tensor::from_data({1, 2, 3, 4}, {2, 2});
     std::vector<Tensor> gradients = ContiguousOp::backward(incoming_gradient);
 
-    EXPECT_FLOAT_EQ(gradients[0].at({0, 0}), 1.f);
-    EXPECT_FLOAT_EQ(gradients[0].at({0, 1}), 2.f);
-    EXPECT_FLOAT_EQ(gradients[0].at({1, 0}), 3.f);
-    EXPECT_FLOAT_EQ(gradients[0].at({1, 1}), 4.f);
+    EXPECT_FLOAT_EQ(gradients[0].at(0, 0), 1.f);
+    EXPECT_FLOAT_EQ(gradients[0].at(0, 1), 2.f);
+    EXPECT_FLOAT_EQ(gradients[0].at(1, 0), 3.f);
+    EXPECT_FLOAT_EQ(gradients[0].at(1, 1), 4.f);
 }
 
 TEST(ContiguousOpBackward, ReturnedGradientHasFreshStorage) {
@@ -230,10 +230,10 @@ TEST(ContiguousFastPath, OutputValuesMatchInput) {
     Tensor input  = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
     Tensor output = contiguous(input);
 
-    EXPECT_FLOAT_EQ(output.at({0, 0}), 1.f);
-    EXPECT_FLOAT_EQ(output.at({0, 2}), 3.f);
-    EXPECT_FLOAT_EQ(output.at({1, 0}), 4.f);
-    EXPECT_FLOAT_EQ(output.at({1, 2}), 6.f);
+    EXPECT_FLOAT_EQ(output.at(0, 0), 1.f);
+    EXPECT_FLOAT_EQ(output.at(0, 2), 3.f);
+    EXPECT_FLOAT_EQ(output.at(1, 0), 4.f);
+    EXPECT_FLOAT_EQ(output.at(1, 2), 6.f);
 }
 
 TEST(ContiguousFastPath, AutogradMetaIsSharedNotCopied) {
@@ -307,12 +307,12 @@ TEST(ContiguousSlowPath, OutputValuesMatchLogicalLayoutOfTransposedInput) {
     Tensor transposed = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3}).transpose();
     Tensor output = contiguous(transposed);
 
-    EXPECT_FLOAT_EQ(output.at({0, 0}), 1.f);
-    EXPECT_FLOAT_EQ(output.at({0, 1}), 4.f);
-    EXPECT_FLOAT_EQ(output.at({1, 0}), 2.f);
-    EXPECT_FLOAT_EQ(output.at({1, 1}), 5.f);
-    EXPECT_FLOAT_EQ(output.at({2, 0}), 3.f);
-    EXPECT_FLOAT_EQ(output.at({2, 1}), 6.f);
+    EXPECT_FLOAT_EQ(output.at(0, 0), 1.f);
+    EXPECT_FLOAT_EQ(output.at(0, 1), 4.f);
+    EXPECT_FLOAT_EQ(output.at(1, 0), 2.f);
+    EXPECT_FLOAT_EQ(output.at(1, 1), 5.f);
+    EXPECT_FLOAT_EQ(output.at(2, 0), 3.f);
+    EXPECT_FLOAT_EQ(output.at(2, 1), 6.f);
 }
 
 TEST(ContiguousSlowPath, OutputShapeMatchesTransposedShape) {
@@ -384,10 +384,10 @@ TEST(ContiguousAutograd, GradientFlowsThroughSlowPath) {
     // The gradient of a copy is an identity, so every element of
     // original.grad() must be 1.f after backward.
     ASSERT_TRUE(original.has_grad());
-    EXPECT_FLOAT_EQ(original.grad().at({0, 0}), 1.f);
-    EXPECT_FLOAT_EQ(original.grad().at({0, 1}), 1.f);
-    EXPECT_FLOAT_EQ(original.grad().at({1, 0}), 1.f);
-    EXPECT_FLOAT_EQ(original.grad().at({1, 1}), 1.f);
+    EXPECT_FLOAT_EQ(original.grad().at(0, 0), 1.f);
+    EXPECT_FLOAT_EQ(original.grad().at(0, 1), 1.f);
+    EXPECT_FLOAT_EQ(original.grad().at(1, 0), 1.f);
+    EXPECT_FLOAT_EQ(original.grad().at(1, 1), 1.f);
 }
 
 TEST(ContiguousAutograd, NoGradAccumulatedOnFastPath) {
@@ -426,7 +426,7 @@ TEST(ContiguousIdempotency, ValuesArePreservedAfterDoubleCall) {
     Tensor transposed    = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3}).transpose();
     Tensor second_result = contiguous(contiguous(transposed));
 
-    EXPECT_FLOAT_EQ(second_result.at({0, 0}), 1.f);
-    EXPECT_FLOAT_EQ(second_result.at({0, 1}), 4.f);
-    EXPECT_FLOAT_EQ(second_result.at({2, 1}), 6.f);
+    EXPECT_FLOAT_EQ(second_result.at(0, 0), 1.f);
+    EXPECT_FLOAT_EQ(second_result.at(0, 1), 4.f);
+    EXPECT_FLOAT_EQ(second_result.at(2, 1), 6.f);
 }

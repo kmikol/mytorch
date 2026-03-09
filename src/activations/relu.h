@@ -11,7 +11,7 @@ struct ReluOp {
         Tensor out = Tensor::zeros({rows, cols});
         for (int64_t r = 0; r < rows; r++)
             for (int64_t c = 0; c < cols; c++)
-                out.at({r,c}) = x.at({r,c}) > 0.f ? x.at({r,c}) : 0.f;
+                out.at(r,c) = x.at(r,c) > 0.f ? x.at(r,c) : 0.f;
         return out;
     }
 
@@ -28,7 +28,7 @@ struct ReluOp {
             for (int64_t c = 0; c < cols; c++)
                 // pass gradient through only where input was positive
                 // everywhere else gradient is zero (ReLU was "off")
-                dx.at({r,c}) = saved_input.at({r,c}) > 0.f ? grad.at({r,c}) : 0.f;
+                dx.at(r,c) = saved_input.at(r,c) > 0.f ? grad.at(r,c) : 0.f;
         return {dx};
     }
 };

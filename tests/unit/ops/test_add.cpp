@@ -32,10 +32,10 @@ TEST(AddOpForward, ComputesCorrectValues) {
 
     Tensor C = AddOp::forward(A,B);
 
-    EXPECT_FLOAT_EQ(C.at({0,0}),6.f);
-    EXPECT_FLOAT_EQ(C.at({0,1}),8.f);
-    EXPECT_FLOAT_EQ(C.at({1,0}),10.f);
-    EXPECT_FLOAT_EQ(C.at({1,1}),12.f);
+    EXPECT_FLOAT_EQ(C.at(0,0),6.f);
+    EXPECT_FLOAT_EQ(C.at(0,1),8.f);
+    EXPECT_FLOAT_EQ(C.at(1,0),10.f);
+    EXPECT_FLOAT_EQ(C.at(1,1),12.f);
 }
 
 TEST(AddOpForward, AddZeroLeavesTensorUnchanged) {
@@ -46,7 +46,7 @@ TEST(AddOpForward, AddZeroLeavesTensorUnchanged) {
 
     for(int r=0;r<2;r++)
         for(int c=0;c<2;c++)
-            EXPECT_FLOAT_EQ(C.at({r,c}),A.at({r,c}));
+            EXPECT_FLOAT_EQ(C.at(r,c),A.at(r,c));
 }
 
 TEST(AddOpForward, OutputIsContiguous) {
@@ -76,13 +76,13 @@ TEST(AddBroadcast, BroadcastSecondTensorAcrossColumns) {
 
     Tensor C = AddOp::forward(A,B);
 
-    EXPECT_FLOAT_EQ(C.at({0,0}),11);
-    EXPECT_FLOAT_EQ(C.at({0,1}),12);
-    EXPECT_FLOAT_EQ(C.at({0,2}),13);
+    EXPECT_FLOAT_EQ(C.at(0,0),11);
+    EXPECT_FLOAT_EQ(C.at(0,1),12);
+    EXPECT_FLOAT_EQ(C.at(0,2),13);
 
-    EXPECT_FLOAT_EQ(C.at({1,0}),24);
-    EXPECT_FLOAT_EQ(C.at({1,1}),25);
-    EXPECT_FLOAT_EQ(C.at({1,2}),26);
+    EXPECT_FLOAT_EQ(C.at(1,0),24);
+    EXPECT_FLOAT_EQ(C.at(1,1),25);
+    EXPECT_FLOAT_EQ(C.at(1,2),26);
 }
 
 TEST(AddBroadcast, BroadcastFirstTensorAcrossColumns) {
@@ -99,13 +99,13 @@ TEST(AddBroadcast, BroadcastFirstTensorAcrossColumns) {
 
     Tensor C = AddOp::forward(A,B);
 
-    EXPECT_FLOAT_EQ(C.at({0,0}),11);
-    EXPECT_FLOAT_EQ(C.at({0,1}),21);
-    EXPECT_FLOAT_EQ(C.at({0,2}),31);
+    EXPECT_FLOAT_EQ(C.at(0,0),11);
+    EXPECT_FLOAT_EQ(C.at(0,1),21);
+    EXPECT_FLOAT_EQ(C.at(0,2),31);
 
-    EXPECT_FLOAT_EQ(C.at({1,0}),42);
-    EXPECT_FLOAT_EQ(C.at({1,1}),52);
-    EXPECT_FLOAT_EQ(C.at({1,2}),62);
+    EXPECT_FLOAT_EQ(C.at(1,0),42);
+    EXPECT_FLOAT_EQ(C.at(1,1),52);
+    EXPECT_FLOAT_EQ(C.at(1,2),62);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -131,11 +131,11 @@ TEST(AddOpBackward, GradientPassesThroughWithoutBroadcast) {
 
     auto g = AddOp::backward(grad,true,true,info,2,2);
 
-    EXPECT_FLOAT_EQ(g[0].at({0,0}),1);
-    EXPECT_FLOAT_EQ(g[0].at({1,1}),4);
+    EXPECT_FLOAT_EQ(g[0].at(0,0),1);
+    EXPECT_FLOAT_EQ(g[0].at(1,1),4);
 
-    EXPECT_FLOAT_EQ(g[1].at({0,0}),1);
-    EXPECT_FLOAT_EQ(g[1].at({1,1}),4);
+    EXPECT_FLOAT_EQ(g[1].at(0,0),1);
+    EXPECT_FLOAT_EQ(g[1].at(1,1),4);
 }
 
 TEST(AddOpBackward, BroadcastGradientForBIsReduced) {
@@ -151,8 +151,8 @@ TEST(AddOpBackward, BroadcastGradientForBIsReduced) {
 
     auto g = AddOp::backward(grad,true,true,info,3,1);
 
-    EXPECT_FLOAT_EQ(g[1].at({0,0}),3);
-    EXPECT_FLOAT_EQ(g[1].at({1,0}),3);
+    EXPECT_FLOAT_EQ(g[1].at(0,0),3);
+    EXPECT_FLOAT_EQ(g[1].at(1,0),3);
 }
 
 TEST(AddOpBackward, BroadcastGradientForAIsReduced) {
@@ -168,8 +168,8 @@ TEST(AddOpBackward, BroadcastGradientForAIsReduced) {
 
     auto g = AddOp::backward(grad,true,true,info,1,3);
 
-    EXPECT_FLOAT_EQ(g[0].at({0,0}),3);
-    EXPECT_FLOAT_EQ(g[0].at({1,0}),6);
+    EXPECT_FLOAT_EQ(g[0].at(0,0),3);
+    EXPECT_FLOAT_EQ(g[0].at(1,0),6);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -222,11 +222,11 @@ TEST(AddBackwardValues, GradientAccumulatesOnInputs) {
     ASSERT_TRUE(A.has_grad());
     ASSERT_TRUE(B.has_grad());
 
-    EXPECT_FLOAT_EQ(A.grad().at({0,0}),1);
-    EXPECT_FLOAT_EQ(A.grad().at({1,1}),1);
+    EXPECT_FLOAT_EQ(A.grad().at(0,0),1);
+    EXPECT_FLOAT_EQ(A.grad().at(1,1),1);
 
-    EXPECT_FLOAT_EQ(B.grad().at({0,0}),1);
-    EXPECT_FLOAT_EQ(B.grad().at({1,1}),1);
+    EXPECT_FLOAT_EQ(B.grad().at(0,0),1);
+    EXPECT_FLOAT_EQ(B.grad().at(1,1),1);
 }
 
 TEST(AddBackwardValues, BroadcastGradientAccumulatesCorrectly) {
@@ -247,6 +247,6 @@ TEST(AddBackwardValues, BroadcastGradientAccumulatesCorrectly) {
 
     ASSERT_TRUE(B.has_grad());
 
-    EXPECT_FLOAT_EQ(B.grad().at({0,0}),3);
-    EXPECT_FLOAT_EQ(B.grad().at({1,0}),3);
+    EXPECT_FLOAT_EQ(B.grad().at(0,0),3);
+    EXPECT_FLOAT_EQ(B.grad().at(1,0),3);
 }

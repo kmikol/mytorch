@@ -78,7 +78,7 @@ TEST(TensorZeros, AllElementsAreZero2D) {
 
     for (int64_t row = 0; row < 3; ++row) {
         for (int64_t col = 0; col < 4; ++col) {
-            EXPECT_FLOAT_EQ(tensor.at({row, col}), 0.f)
+            EXPECT_FLOAT_EQ(tensor.at(row, col), 0.f)
                 << "expected 0 at [" << row << ", " << col << "]";
         }
     }
@@ -90,7 +90,7 @@ TEST(TensorZeros, AllElementsAreZero3D) {
     for (int64_t d0 = 0; d0 < 2; ++d0) {
         for (int64_t d1 = 0; d1 < 3; ++d1) {
             for (int64_t d2 = 0; d2 < 4; ++d2) {
-                EXPECT_FLOAT_EQ(tensor.at({d0, d1, d2}), 0.f)
+                EXPECT_FLOAT_EQ(tensor.at(d0, d1, d2), 0.f)
                     << "expected 0 at [" << d0 << ", " << d1 << ", " << d2 << "]";
             }
         }
@@ -136,19 +136,19 @@ TEST(TensorFromData, TwoDimensionalCornerValues) {
     //   [4  5  6]
     Tensor tensor = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
 
-    EXPECT_FLOAT_EQ(tensor.at({0, 0}), 1.f);   // top-left
-    EXPECT_FLOAT_EQ(tensor.at({0, 2}), 3.f);   // top-right
-    EXPECT_FLOAT_EQ(tensor.at({1, 0}), 4.f);   // bottom-left
-    EXPECT_FLOAT_EQ(tensor.at({1, 2}), 6.f);   // bottom-right
+    EXPECT_FLOAT_EQ(tensor.at(0, 0), 1.f);   // top-left
+    EXPECT_FLOAT_EQ(tensor.at(0, 2), 3.f);   // top-right
+    EXPECT_FLOAT_EQ(tensor.at(1, 0), 4.f);   // bottom-left
+    EXPECT_FLOAT_EQ(tensor.at(1, 2), 6.f);   // bottom-right
 }
 
 TEST(TensorFromData, TwoDimensionalInteriorValue) {
     Tensor tensor = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
 
     // [0,1] is the second column of the first row — value 2
-    EXPECT_FLOAT_EQ(tensor.at({0, 1}), 2.f);
+    EXPECT_FLOAT_EQ(tensor.at(0, 1), 2.f);
     // [1,1] is the centre element — value 5
-    EXPECT_FLOAT_EQ(tensor.at({1, 1}), 5.f);
+    EXPECT_FLOAT_EQ(tensor.at(1, 1), 5.f);
 }
 
 TEST(TensorFromData, ThreeDimensionalShapeIsRecordedCorrectly) {
@@ -167,10 +167,10 @@ TEST(TensorFromData, ThreeDimensionalCornerValues) {
     //            [3  4]             [7  8]
     Tensor tensor = Tensor::from_data({1, 2, 3, 4, 5, 6, 7, 8}, {2, 2, 2});
 
-    EXPECT_FLOAT_EQ(tensor.at({0, 0, 0}), 1.f);   // first element of slab 0
-    EXPECT_FLOAT_EQ(tensor.at({0, 1, 1}), 4.f);   // last element of slab 0
-    EXPECT_FLOAT_EQ(tensor.at({1, 0, 0}), 5.f);   // first element of slab 1
-    EXPECT_FLOAT_EQ(tensor.at({1, 1, 1}), 8.f);   // last element overall
+    EXPECT_FLOAT_EQ(tensor.at(0, 0, 0), 1.f);   // first element of slab 0
+    EXPECT_FLOAT_EQ(tensor.at(0, 1, 1), 4.f);   // last element of slab 0
+    EXPECT_FLOAT_EQ(tensor.at(1, 0, 0), 5.f);   // first element of slab 1
+    EXPECT_FLOAT_EQ(tensor.at(1, 1, 1), 8.f);   // last element overall
 }
 
 TEST(TensorFromData, DoesNotRequireGradByDefault) {
@@ -244,26 +244,26 @@ TEST(TensorMetadata, NdimMatchesNumberOfAxes) {
 TEST(TensorReadWrite, ReadFromZerosTensor2D) {
     Tensor tensor = Tensor::zeros({3, 3});
 
-    EXPECT_FLOAT_EQ(tensor.at({0, 0}), 0.f);
-    EXPECT_FLOAT_EQ(tensor.at({2, 2}), 0.f);
+    EXPECT_FLOAT_EQ(tensor.at(0, 0), 0.f);
+    EXPECT_FLOAT_EQ(tensor.at(2, 2), 0.f);
 }
 
 TEST(TensorReadWrite, WriteAndReadBack2D) {
     Tensor tensor = Tensor::zeros({3, 3});
-    tensor.at({0, 1}) = 7.f;
-    EXPECT_FLOAT_EQ(tensor.at({0, 1}), 7.f);
+    tensor.at(0, 1) = 7.f;
+    EXPECT_FLOAT_EQ(tensor.at(0, 1), 7.f);
 }
 
 TEST(TensorReadWrite, WriteAndReadBack3D) {
     Tensor tensor = Tensor::zeros({2, 3, 4});
-    tensor.at({1, 2, 3}) = 42.f;
-    EXPECT_FLOAT_EQ(tensor.at({1, 2, 3}), 42.f);
+    tensor.at(1, 2, 3) = 42.f;
+    EXPECT_FLOAT_EQ(tensor.at(1, 2, 3), 42.f);
 }
 
 TEST(TensorReadWrite, WriteAndReadBack4D) {
     Tensor tensor = Tensor::zeros({2, 3, 4, 5});
-    tensor.at({1, 2, 3, 4}) = 99.f;
-    EXPECT_FLOAT_EQ(tensor.at({1, 2, 3, 4}), 99.f);
+    tensor.at(1, 2, 3, 4) = 99.f;
+    EXPECT_FLOAT_EQ(tensor.at(1, 2, 3, 4), 99.f);
 }
 
 TEST(TensorReadWrite, WriteDoesNotCorruptNeighbouringElements) {
@@ -271,10 +271,10 @@ TEST(TensorReadWrite, WriteDoesNotCorruptNeighbouringElements) {
     // immediately before and after it in storage are untouched.
     // This would catch an off-by-one error in the stride arithmetic.
     Tensor tensor = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    tensor.at({0, 1}) = 99.f;   // middle of the first row
+    tensor.at(0, 1) = 99.f;   // middle of the first row
 
-    EXPECT_FLOAT_EQ(tensor.at({0, 0}), 1.f);   // element before
-    EXPECT_FLOAT_EQ(tensor.at({0, 2}), 3.f);   // element after
+    EXPECT_FLOAT_EQ(tensor.at(0, 0), 1.f);   // element before
+    EXPECT_FLOAT_EQ(tensor.at(0, 2), 3.f);   // element after
 }
 
 TEST(TensorReadWrite, WriteIsVisibleThroughRawStoragePointer) {
@@ -282,7 +282,7 @@ TEST(TensorReadWrite, WriteIsVisibleThroughRawStoragePointer) {
     // underlying storage, not just at whichever offset at() happens to read.
     // For shape {2,3} with strides {3,1}, at({1,0}) → flat index 3.
     Tensor tensor = Tensor::zeros({2, 3});
-    tensor.at({1, 0}) = 55.f;
+    tensor.at(1, 0) = 55.f;
 
     EXPECT_FLOAT_EQ(tensor.implementation->storage->ptr()[3], 55.f);
 }
@@ -290,13 +290,13 @@ TEST(TensorReadWrite, WriteIsVisibleThroughRawStoragePointer) {
 TEST(TensorReadWrite, MultipleDistinctWritesDoNotInterfere) {
     // Write to several elements and verify each is independently retained.
     Tensor tensor = Tensor::zeros({3, 3});
-    tensor.at({0, 0}) = 10.f;
-    tensor.at({1, 1}) = 20.f;
-    tensor.at({2, 2}) = 30.f;
+    tensor.at(0, 0) = 10.f;
+    tensor.at(1, 1) = 20.f;
+    tensor.at(2, 2) = 30.f;
 
-    EXPECT_FLOAT_EQ(tensor.at({0, 0}), 10.f);
-    EXPECT_FLOAT_EQ(tensor.at({1, 1}), 20.f);
-    EXPECT_FLOAT_EQ(tensor.at({2, 2}), 30.f);
+    EXPECT_FLOAT_EQ(tensor.at(0, 0), 10.f);
+    EXPECT_FLOAT_EQ(tensor.at(1, 1), 20.f);
+    EXPECT_FLOAT_EQ(tensor.at(2, 2), 30.f);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -322,9 +322,9 @@ TEST(TensorIndependence, WritingToOneTensorDoesNotAffectAnother) {
     Tensor tensor_a = Tensor::from_data({1, 2, 3, 4}, {2, 2});
     Tensor tensor_b = Tensor::from_data({1, 2, 3, 4}, {2, 2});
 
-    tensor_a.at({0, 0}) = 99.f;
+    tensor_a.at(0, 0) = 99.f;
 
-    EXPECT_FLOAT_EQ(tensor_b.at({0, 0}), 1.f);
+    EXPECT_FLOAT_EQ(tensor_b.at(0, 0), 1.f);
 }
 
 TEST(TensorIndependence, TwoZerosTensorsHaveDifferentStoragePointers) {
@@ -357,10 +357,10 @@ TEST(TensorClone, ClonedTensorHasSameValues2D) {
     Tensor original = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
     Tensor cloned   = original.clone();
 
-    EXPECT_FLOAT_EQ(cloned.at({0, 0}), 1.f);
-    EXPECT_FLOAT_EQ(cloned.at({0, 2}), 3.f);
-    EXPECT_FLOAT_EQ(cloned.at({1, 0}), 4.f);
-    EXPECT_FLOAT_EQ(cloned.at({1, 2}), 6.f);
+    EXPECT_FLOAT_EQ(cloned.at(0, 0), 1.f);
+    EXPECT_FLOAT_EQ(cloned.at(0, 2), 3.f);
+    EXPECT_FLOAT_EQ(cloned.at(1, 0), 4.f);
+    EXPECT_FLOAT_EQ(cloned.at(1, 2), 6.f);
 }
 
 TEST(TensorClone, ClonedTensorHasSameShape) {
@@ -389,18 +389,18 @@ TEST(TensorClone, MutatingCloneDoesNotAffectOriginal) {
     Tensor original = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
     Tensor cloned   = original.clone();
 
-    cloned.at({0, 0}) = 99.f;
+    cloned.at(0, 0) = 99.f;
 
-    EXPECT_FLOAT_EQ(original.at({0, 0}), 1.f);
+    EXPECT_FLOAT_EQ(original.at(0, 0), 1.f);
 }
 
 TEST(TensorClone, MutatingOriginalDoesNotAffectClone) {
     Tensor original = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
     Tensor cloned   = original.clone();
 
-    original.at({0, 0}) = 99.f;
+    original.at(0, 0) = 99.f;
 
-    EXPECT_FLOAT_EQ(cloned.at({0, 0}), 1.f);
+    EXPECT_FLOAT_EQ(cloned.at(0, 0), 1.f);
 }
 
 TEST(TensorClone, ClonePreservesNdimFor3D) {
@@ -408,7 +408,7 @@ TEST(TensorClone, ClonePreservesNdimFor3D) {
     Tensor cloned   = original.clone();
 
     EXPECT_EQ(cloned.ndim(),      3);
-    EXPECT_FLOAT_EQ(cloned.at({1, 1, 1}), 8.f);
+    EXPECT_FLOAT_EQ(cloned.at(1, 1, 1), 8.f);
 }
 
 TEST(TensorClone, CloneOfTransposedTensorHasCorrectLogicalValues) {
@@ -427,12 +427,12 @@ TEST(TensorClone, CloneOfTransposedTensorHasCorrectLogicalValues) {
     EXPECT_EQ(cloned.shape(0), 3);
     EXPECT_EQ(cloned.shape(1), 2);
 
-    EXPECT_FLOAT_EQ(cloned.at({0, 0}), 1.f);
-    EXPECT_FLOAT_EQ(cloned.at({0, 1}), 4.f);
-    EXPECT_FLOAT_EQ(cloned.at({1, 0}), 2.f);
-    EXPECT_FLOAT_EQ(cloned.at({1, 1}), 5.f);
-    EXPECT_FLOAT_EQ(cloned.at({2, 0}), 3.f);
-    EXPECT_FLOAT_EQ(cloned.at({2, 1}), 6.f);
+    EXPECT_FLOAT_EQ(cloned.at(0, 0), 1.f);
+    EXPECT_FLOAT_EQ(cloned.at(0, 1), 4.f);
+    EXPECT_FLOAT_EQ(cloned.at(1, 0), 2.f);
+    EXPECT_FLOAT_EQ(cloned.at(1, 1), 5.f);
+    EXPECT_FLOAT_EQ(cloned.at(2, 0), 3.f);
+    EXPECT_FLOAT_EQ(cloned.at(2, 1), 6.f);
 }
 
 TEST(TensorClone, CloneOfTransposedTensorIsContiguous) {
@@ -505,12 +505,12 @@ TEST(TensorTranspose, ElementValuesAreRemappedCorrectly) {
     Tensor original   = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
     Tensor transposed = original.transpose();
 
-    EXPECT_FLOAT_EQ(transposed.at({0, 0}), 1.f);
-    EXPECT_FLOAT_EQ(transposed.at({0, 1}), 4.f);
-    EXPECT_FLOAT_EQ(transposed.at({1, 0}), 2.f);
-    EXPECT_FLOAT_EQ(transposed.at({1, 1}), 5.f);
-    EXPECT_FLOAT_EQ(transposed.at({2, 0}), 3.f);
-    EXPECT_FLOAT_EQ(transposed.at({2, 1}), 6.f);
+    EXPECT_FLOAT_EQ(transposed.at(0, 0), 1.f);
+    EXPECT_FLOAT_EQ(transposed.at(0, 1), 4.f);
+    EXPECT_FLOAT_EQ(transposed.at(1, 0), 2.f);
+    EXPECT_FLOAT_EQ(transposed.at(1, 1), 5.f);
+    EXPECT_FLOAT_EQ(transposed.at(2, 0), 3.f);
+    EXPECT_FLOAT_EQ(transposed.at(2, 1), 6.f);
 }
 
 TEST(TensorTranspose, DoubleTransposeRestoresOriginalShape) {
@@ -525,10 +525,10 @@ TEST(TensorTranspose, DoubleTransposeRestoresOriginalValues) {
     Tensor original          = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
     Tensor double_transposed = original.transpose().transpose();
 
-    EXPECT_FLOAT_EQ(double_transposed.at({0, 0}), 1.f);
-    EXPECT_FLOAT_EQ(double_transposed.at({0, 2}), 3.f);
-    EXPECT_FLOAT_EQ(double_transposed.at({1, 0}), 4.f);
-    EXPECT_FLOAT_EQ(double_transposed.at({1, 2}), 6.f);
+    EXPECT_FLOAT_EQ(double_transposed.at(0, 0), 1.f);
+    EXPECT_FLOAT_EQ(double_transposed.at(0, 2), 3.f);
+    EXPECT_FLOAT_EQ(double_transposed.at(1, 0), 4.f);
+    EXPECT_FLOAT_EQ(double_transposed.at(1, 2), 6.f);
 }
 
 TEST(TensorTranspose, WriteThroughTransposedViewAffectsOriginal) {
@@ -540,9 +540,9 @@ TEST(TensorTranspose, WriteThroughTransposedViewAffectsOriginal) {
     Tensor original   = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
     Tensor transposed = original.transpose();
 
-    transposed.at({1, 0}) = 99.f;
+    transposed.at(1, 0) = 99.f;
 
-    EXPECT_FLOAT_EQ(original.at({0, 1}), 99.f);
+    EXPECT_FLOAT_EQ(original.at(0, 1), 99.f);
 }
 
 TEST(TensorTranspose, WriteToOriginalAffectsTransposedView) {
@@ -550,10 +550,10 @@ TEST(TensorTranspose, WriteToOriginalAffectsTransposedView) {
     Tensor original   = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
     Tensor transposed = original.transpose();
 
-    original.at({1, 2}) = 77.f;   // bottom-right of original
+    original.at(1, 2) = 77.f;   // bottom-right of original
 
     // In transposed that position becomes [2, 1] (last row, second column)
-    EXPECT_FLOAT_EQ(transposed.at({2, 1}), 77.f);
+    EXPECT_FLOAT_EQ(transposed.at(2, 1), 77.f);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
