@@ -39,7 +39,7 @@ struct AddOp {
                 // if A or B is broadcast, always read from column 0
                 int64_t ac = info.a_broadcast_cols ? 0 : c;
                 int64_t bc = info.b_broadcast_cols ? 0 : c;
-                C.at({r, c}) = A.at({r, ac}) + B.at({r, bc});
+                C.at(r, c) = A.at(r, ac) + B.at(r, bc);
             }
         }
 
@@ -64,7 +64,7 @@ struct AddOp {
                 Tensor dA = Tensor::zeros({rows, 1});
                 for (int64_t r = 0; r < rows; r++)
                     for (int64_t c = 0; c < cols; c++)
-                        dA.at({r, 0}) += grad.at({r, c});
+                        dA.at(r, 0) += grad.at(r, c);
                 grads[0] = dA;
             } else {
                 // no broadcast — gradient passes straight through
@@ -80,7 +80,7 @@ struct AddOp {
                 Tensor dB = Tensor::zeros({rows, 1});
                 for (int64_t r = 0; r < rows; r++)
                     for (int64_t c = 0; c < cols; c++)
-                        dB.at({r, 0}) += grad.at({r, c});
+                        dB.at(r, 0) += grad.at(r, c);
                 grads[1] = dB;
             } else {
                 grads[1] = grad.clone();

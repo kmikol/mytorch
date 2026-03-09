@@ -59,7 +59,7 @@ static Tensor onehot_to_indices(const Tensor& onehot) {
     std::vector<float> indices(N);
     for (int64_t n = 0; n < N; n++) {
         for (int64_t c = 0; c < 10; c++) {
-            if (onehot.at({c, n}) > 0.5f) {
+            if (onehot.at(c, n) > 0.5f) {
                 indices[n] = (float)c;
                 break;
             }
@@ -164,7 +164,7 @@ int main(int argc, char* argv[]) {
 
         // ---- loss ----
         Tensor loss = cross_entropy_loss(logits, targets);
-        total_loss += loss.at({0, 0});
+        total_loss += loss.at(0, 0);
 
         // ---- backward + update ----
         optim.zero_grad();

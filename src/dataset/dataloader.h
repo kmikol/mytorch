@@ -64,10 +64,10 @@ public:
             }
 
             for (int64_t r = 0; r < input_rows; ++r)
-                input_buffer[r + b * input_rows] = s.input.at({r,0});
+                input_buffer[r + b * input_rows] = s.input.at(r,0);
 
             for (int64_t r = 0; r < target_rows; ++r)
-                target_buffer[r + b * target_rows] = s.target.at({r,0});
+                target_buffer[r + b * target_rows] = s.target.at(r,0);
         }
 
         position = end;

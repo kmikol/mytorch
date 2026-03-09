@@ -17,13 +17,27 @@ struct ContiguousOp {
             0
         );
 
-        // walk every element in logical order and copy into packed storage
-        // for_each_index guarantees row-major traversal regardless of
-        // the original tensor's strides
-        int64_t flat = 0;
-        for_each_index(t.implementation->shape, [&](const std::vector<int64_t>& idx) {
-            new_storage->ptr()[flat++] = t.implementation->at(idx);
-        });
+        const auto& shape   = t.implementation->shape;
+        const auto& strides = t.implementation->strides;
+        const size_t offset = t.implementation->offset;
+        const float* src    = t.implementation->storage->ptr();
+        float*       dst    = new_storage->ptr();
+        int64_t ndim        = (int64_t)shape.size();
+        int64_t numel       = t.numel();
+
+        std::vector<int64_t> idx(ndim, 0);
+        for (int64_t flat = 0; flat < numel; ++flat) {
+            int64_t src_idx = offset;
+            for (int64_t d = 0; d < ndim; ++d)
+                src_idx += idx[d] * strides[d];
+            dst[flat] = src[src_idx];
+
+            // row-major carry
+            for (int64_t d = ndim - 1; d >= 0; --d) {
+                if (++idx[d] < shape[d]) break;
+                idx[d] = 0;
+            }
+        }
 
         Tensor result;
         result.implementation = new_impl;

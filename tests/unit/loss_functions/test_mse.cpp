@@ -15,7 +15,7 @@ TEST(MSELossTest, ScalarInputForward) {
 
     EXPECT_EQ(loss.shape(0), 1);
     EXPECT_EQ(loss.shape(1), 1);
-    EXPECT_FLOAT_EQ(loss.at({0,0}), 1.0f); // (2-3)^2 = 1
+    EXPECT_FLOAT_EQ(loss.at(0,0), 1.0f); // (2-3)^2 = 1
 }
 
 TEST(MSELossTest, ScalarInputBackward) {
@@ -26,7 +26,7 @@ TEST(MSELossTest, ScalarInputBackward) {
     backward(loss);
 
     ASSERT_TRUE(pred.has_grad());
-    EXPECT_FLOAT_EQ(pred.grad().at({0,0}), 2.0f * (2.0f - 3.0f) / 1.0f); // 2*(2-3)/n=2*(2-3)/1=-2
+    EXPECT_FLOAT_EQ(pred.grad().at(0,0), 2.0f * (2.0f - 3.0f) / 1.0f); // 2*(2-3)/n=2*(2-3)/1=-2
 }
 
 TEST(MSELossTest, VectorInputForward) {
@@ -36,7 +36,7 @@ TEST(MSELossTest, VectorInputForward) {
     Tensor loss = mse_loss(pred, target);
 
     float expected = ((1-2)*(1-2) + (2-2)*(2-2) + (3-2)*(3-2)) / 3.0f;
-    EXPECT_FLOAT_EQ(loss.at({0,0}), expected);
+    EXPECT_FLOAT_EQ(loss.at(0,0), expected);
 }
 
 TEST(MSELossTest, VectorInputBackward) {
@@ -47,9 +47,9 @@ TEST(MSELossTest, VectorInputBackward) {
     backward(loss);
 
     ASSERT_TRUE(pred.has_grad());
-    EXPECT_FLOAT_EQ(pred.grad().at({0,0}), 2.0f*(1-2)/3.0f);
-    EXPECT_FLOAT_EQ(pred.grad().at({0,1}), 2.0f*(2-2)/3.0f);
-    EXPECT_FLOAT_EQ(pred.grad().at({0,2}), 2.0f*(3-2)/3.0f);
+    EXPECT_FLOAT_EQ(pred.grad().at(0,0), 2.0f*(1-2)/3.0f);
+    EXPECT_FLOAT_EQ(pred.grad().at(0,1), 2.0f*(2-2)/3.0f);
+    EXPECT_FLOAT_EQ(pred.grad().at(0,2), 2.0f*(3-2)/3.0f);
 }
 
 TEST(MSELossTest, Batched2DForward) {
@@ -62,7 +62,7 @@ TEST(MSELossTest, Batched2DForward) {
                  + (4-1)*(4-1) + (5-1)*(5-1) + (6-1)*(6-1);
     float expected = sum_sq / 6.0f;
 
-    EXPECT_FLOAT_EQ(loss.at({0,0}), expected);
+    EXPECT_FLOAT_EQ(loss.at(0,0), expected);
 }
 
 TEST(MSELossTest, Batched2DBackward) {
@@ -75,10 +75,10 @@ TEST(MSELossTest, Batched2DBackward) {
     ASSERT_TRUE(pred.has_grad());
 
     float n = 6.0f;
-    EXPECT_FLOAT_EQ(pred.grad().at({0,0}), 2*(1-1)/n);
-    EXPECT_FLOAT_EQ(pred.grad().at({0,1}), 2*(2-1)/n);
-    EXPECT_FLOAT_EQ(pred.grad().at({0,2}), 2*(3-1)/n);
-    EXPECT_FLOAT_EQ(pred.grad().at({1,0}), 2*(4-1)/n);
-    EXPECT_FLOAT_EQ(pred.grad().at({1,1}), 2*(5-1)/n);
-    EXPECT_FLOAT_EQ(pred.grad().at({1,2}), 2*(6-1)/n);
+    EXPECT_FLOAT_EQ(pred.grad().at(0,0), 2*(1-1)/n);
+    EXPECT_FLOAT_EQ(pred.grad().at(0,1), 2*(2-1)/n);
+    EXPECT_FLOAT_EQ(pred.grad().at(0,2), 2*(3-1)/n);
+    EXPECT_FLOAT_EQ(pred.grad().at(1,0), 2*(4-1)/n);
+    EXPECT_FLOAT_EQ(pred.grad().at(1,1), 2*(5-1)/n);
+    EXPECT_FLOAT_EQ(pred.grad().at(1,2), 2*(6-1)/n);
 }

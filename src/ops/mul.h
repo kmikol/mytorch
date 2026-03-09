@@ -20,7 +20,7 @@ struct MulOp {
         } else {
             for (int64_t r = 0; r < rows; ++r)
                 for (int64_t c = 0; c < cols; ++c)
-                    C.at({r,c}) = A.at({r,c}) * B.at({r,c});
+                    C.at(r,c) = A.at(r,c) * B.at(r,c);
         }
 
         return C;
@@ -40,7 +40,7 @@ struct MulOp {
             Tensor gA = Tensor::zeros({rows, cols});
             for (int64_t r = 0; r < rows; ++r)
                 for (int64_t c = 0; c < cols; ++c)
-                    gA.at({r,c}) = grad.at({r,c}) * saved_B.at({r,c});
+                    gA.at(r,c) = grad.at(r,c) * saved_B.at(r,c);
             grads[0] = gA;
         }
 
@@ -48,7 +48,7 @@ struct MulOp {
             Tensor gB = Tensor::zeros({rows, cols});
             for (int64_t r = 0; r < rows; ++r)
                 for (int64_t c = 0; c < cols; ++c)
-                    gB.at({r,c}) = grad.at({r,c}) * saved_A.at({r,c});
+                    gB.at(r,c) = grad.at(r,c) * saved_A.at(r,c);
             grads[1] = gB;
         }
 

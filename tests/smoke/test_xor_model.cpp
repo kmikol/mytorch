@@ -229,7 +229,7 @@ TEST_F(XORTest, ForwardPassOutputIsInZeroOneRange) {
     for (const std::vector<float>& input_values : sample_inputs) {
         Tensor input  = Tensor::from_data(input_values, {2, 1});
         Tensor output = network.forward(input);
-        float  value  = output.at({0, 0});
+        float  value  = output.at(0, 0);
 
         EXPECT_GT(value, 0.f) << "sigmoid output must be > 0";
         EXPECT_LT(value, 1.f) << "sigmoid output must be < 1";
@@ -261,7 +261,7 @@ TEST_F(XORTest, ConvergesWithinEpochBudget) {
             Tensor prediction = network.forward(input);
             Tensor loss       = mse_loss(prediction, target);
 
-            total_loss_this_epoch += loss.at({0, 0});
+            total_loss_this_epoch += loss.at(0, 0);
 
             optimiser.zero_grad();
             backward(loss);
@@ -321,7 +321,7 @@ TEST_F(XORTest, ConvergesWithinEpochBudgetBatched) {
         Tensor prediction = network.forward(batch_inputs);
         Tensor loss       = mse_loss(prediction, batch_targets);
 
-        last_epoch_loss = loss.at({0, 0});
+        last_epoch_loss = loss.at(0, 0);
 
         optimiser.zero_grad();
         backward(loss);
@@ -364,7 +364,7 @@ TEST_F(XORTest, FinalLossIsBelowThreshold) {
 
             Tensor prediction = network.forward(input);
             Tensor loss       = mse_loss(prediction, target);
-            total_loss_this_epoch += loss.at({0, 0});
+            total_loss_this_epoch += loss.at(0, 0);
 
             optimiser.zero_grad();
             backward(loss);

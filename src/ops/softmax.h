@@ -28,24 +28,24 @@ inline Tensor softmax(const Tensor& x, int dim = 0) {
         // without this: exp(1000) = inf, exp(inf)/sum(inf) = nan
         float max_val = -std::numeric_limits<float>::infinity();
         for (int64_t i = 0; i < slice_len; i++) {
-            float v = (dim == 0) ? x.at({i, s}) : x.at({s, i});
+            float v = (dim == 0) ? x.at(i, s) : x.at(s, i);
             if (v > max_val) max_val = v;
         }
 
         // ---- step 2: compute exp(x - max) and accumulate sum ----
         float sum_exp = 0.f;
         for (int64_t i = 0; i < slice_len; i++) {
-            float v  = (dim == 0) ? x.at({i, s}) : x.at({s, i});
+            float v  = (dim == 0) ? x.at(i, s) : x.at(s, i);
             float e  = std::exp(v - max_val);   // largest value becomes exp(0)=1
             sum_exp += e;
-            if (dim == 0) out.at({i, s}) = e;
-            else          out.at({s, i}) = e;
+            if (dim == 0) out.at(i, s) = e;
+            else          out.at(s, i) = e;
         }
 
         // ---- step 3: divide by sum → values now sum to 1 ----
         for (int64_t i = 0; i < slice_len; i++) {
-            if (dim == 0) out.at({i, s}) /= sum_exp;
-            else          out.at({s, i}) /= sum_exp;
+            if (dim == 0) out.at(i, s) /= sum_exp;
+            else          out.at(s, i) /= sum_exp;
         }
     }
 
@@ -84,8 +84,8 @@ inline Tensor softmax(const Tensor& x, int dim = 0) {
                     // computing dot first avoids materialising the full Jacobian matrix
                     float dot = 0.f;
                     for (int64_t i = 0; i < slice_len; i++) {
-                        float g = (dim == 0) ? grad.at({i, s})      : grad.at({s, i});
-                        float o = (dim == 0) ? saved_out.at({i, s}) : saved_out.at({s, i});
+                        float g = (dim == 0) ? grad.at(i, s)      : grad.at(s, i);
+                        float o = (dim == 0) ? saved_out.at(i, s) : saved_out.at(s, i);
                         dot += g * o;
                     }
 
@@ -95,13 +95,13 @@ inline Tensor softmax(const Tensor& x, int dim = 0) {
                     // required because softmax outputs sum to 1, so their
                     // gradients must sum to 0 (perturbations must be zero-sum)
                     for (int64_t i = 0; i < slice_len; i++) {
-                        float g = (dim == 0) ? grad.at({i, s})      : grad.at({s, i});
-                        float o = (dim == 0) ? saved_out.at({i, s}) : saved_out.at({s, i});
+                        float g = (dim == 0) ? grad.at(i, s)      : grad.at(s, i);
+                        float o = (dim == 0) ? saved_out.at(i, s) : saved_out.at(s, i);
 
                         float d = o * (g - dot);
 
-                        if (dim == 0) dx.at({i, s}) = d;
-                        else          dx.at({s, i}) = d;
+                        if (dim == 0) dx.at(i, s) = d;
+                        else          dx.at(s, i) = d;
                     }
                 }
 

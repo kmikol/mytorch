@@ -37,16 +37,16 @@ static float evaluate_accuracy(MnistDNN& net, DataLoader& loader) {
 
             // predicted class: argmax over logits for sample n
             int64_t pred_class = 0;
-            float   best_val   = logits.at({0, n});
+            float   best_val   = logits.at(0, n);
             for (int64_t c = 1; c < 10; c++) {
-                float v = logits.at({c, n});
+                float v = logits.at(c, n);
                 if (v > best_val) { best_val = v; pred_class = c; }
             }
 
             // true class: argmax over one-hot target for sample n
             int64_t true_class = 0;
             for (int64_t c = 1; c < 10; c++)
-                if (targets.at({c, n}) > targets.at({true_class, n}))
+                if (targets.at(c, n) > targets.at(true_class, n))
                     true_class = c;
 
             if (pred_class == true_class) ++correct;
@@ -67,7 +67,7 @@ static Tensor onehot_to_indices(const Tensor& onehot) {
     std::vector<float> indices(N);
     for (int64_t n = 0; n < N; n++) {
         for (int64_t c = 0; c < 10; c++) {
-            if (onehot.at({c, n}) > 0.5f) {
+            if (onehot.at(c, n) > 0.5f) {
                 indices[n] = (float)c;
                 break;
             }
@@ -137,7 +137,7 @@ TEST(MnistSmoke, TrainsAndLossDecreases) {
             Tensor logits = net.forward(inputs);
             Tensor loss   = cross_entropy_loss(logits, targets);
 
-            total_loss += loss.at({0, 0});
+            total_loss += loss.at(0, 0);
             ++n_batches;
 
             optim.zero_grad();
@@ -252,8 +252,8 @@ TEST(MnistSmoke, ForwardOutputIsFinite) {
 
     for (int64_t c = 0; c < 10; c++)
         for (int64_t n = 0; n < 4; n++) {
-            EXPECT_FALSE(std::isnan(out.at({c, n}))) << "nan at [" << c << "," << n << "]";
-            EXPECT_FALSE(std::isinf(out.at({c, n}))) << "inf at [" << c << "," << n << "]";
+            EXPECT_FALSE(std::isnan(out.at(c, n))) << "nan at [" << c << "," << n << "]";
+            EXPECT_FALSE(std::isinf(out.at(c, n))) << "inf at [" << c << "," << n << "]";
         }
 }
 

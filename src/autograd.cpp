@@ -62,7 +62,7 @@ void backward(Tensor& output) {
             } else {
                 for (int64_t r = 0; r < input_meta->grad->shape(0); ++r)
                     for (int64_t c = 0; c < input_meta->grad->shape(1); ++c)
-                        input_meta->grad->at({r, c}) += input_grads[j].at({r, c});
+                        input_meta->grad->at(r, c) += input_grads[j].at(r, c);
             }
         }
     }

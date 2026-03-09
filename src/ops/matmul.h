@@ -29,7 +29,7 @@ struct MatMulOp {
             for (int64_t m = 0; m < M; m++)
                 for (int64_t k = 0; k < K; k++)
                     for (int64_t n = 0; n < N; n++)
-                        C.at({m,n}) += A.at({m,k}) * B.at({k,n});
+                        C.at(m,n) += A.at(m,k) * B.at(k,n);
         }
 
         return C;

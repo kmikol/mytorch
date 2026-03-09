@@ -10,7 +10,7 @@ struct SigmoidOp {
         Tensor out = Tensor::zeros({rows, cols});
         for (int64_t r = 0; r < rows; r++)
             for (int64_t c = 0; c < cols; c++)
-                out.at({r,c}) = 1.f / (1.f + std::exp(-x.at({r,c})));
+                out.at(r,c) = 1.f / (1.f + std::exp(-x.at(r,c)));
         return out;
     }
 
@@ -24,8 +24,8 @@ struct SigmoidOp {
         Tensor dx = Tensor::zeros({rows, cols});
         for (int64_t r = 0; r < rows; r++)
             for (int64_t c = 0; c < cols; c++) {
-                float s = saved_out.at({r,c});
-                dx.at({r,c}) = grad.at({r,c}) * s * (1.f - s);
+                float s = saved_out.at(r,c);
+                dx.at(r,c) = grad.at(r,c) * s * (1.f - s);
             }
         return {dx};
     }

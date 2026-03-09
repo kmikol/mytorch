@@ -39,7 +39,7 @@ struct SGD {
             for (int64_t r = 0; r < p->shape(0); r++) {
                 for (int64_t c = 0; c < p->shape(1); c++) {
                     // move weight opposite to gradient direction
-                    p->at({r, c}) -= lr * grad.at({r, c});
+                    p->at(r, c) -= lr * grad.at(r, c);
                 }
             }
         }
