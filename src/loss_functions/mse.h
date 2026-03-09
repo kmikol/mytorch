@@ -24,7 +24,7 @@ inline Tensor mse_loss(const Tensor& pred, const Tensor& target) {
     // result is a single number stored in a [1,1] tensor
     Tensor loss = Tensor::from_data({sum / n}, {1, 1});
 
-    if (pred.requires_grad()) {
+    if (grad_mode_enabled && pred.requires_grad()) {
 
         std::shared_ptr<AutogradMeta> autograd_meta_pred = pred.autograd_meta;
 

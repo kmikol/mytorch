@@ -98,7 +98,9 @@ inline Tensor add(const Tensor& A, const Tensor& B) {
     Tensor C = AddOp::forward(A, B);
 
     bool rA = A.requires_grad(), rB = B.requires_grad();
-    if (!(rA || rB)) return C;
+    if (!grad_mode_enabled || !(rA || rB)) return C;
+
+    NoGradGuard no_grad;
 
     int64_t A_cols = A.shape(1), B_cols = B.shape(1);
 

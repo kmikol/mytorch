@@ -43,7 +43,10 @@ struct ViewOp {
 inline Tensor view(const Tensor& tensor, std::vector<int64_t> new_shape) {
     Tensor out = ViewOp::forward(tensor, new_shape);
 
-    if (tensor.requires_grad()) {
+    if (grad_mode_enabled && tensor.requires_grad()) {
+
+        NoGradGuard no_grad;
+        
         // capture the original shape so backward can restore it
         std::vector<int64_t> original_shape = tensor.implementation->shape;
 

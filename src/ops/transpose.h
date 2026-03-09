@@ -43,7 +43,10 @@ inline Tensor transpose(const Tensor& t, int dim0, int dim1) {
 
     Tensor out = TransposeOp::forward(t, dim0, dim1);
 
-    if (t.requires_grad()) {
+    if (grad_mode_enabled && t.requires_grad()) {
+
+        NoGradGuard no_grad;
+
         out.autograd_meta = make_grad_meta(
             "transpose",
             {t.autograd_meta},

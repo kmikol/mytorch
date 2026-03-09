@@ -49,7 +49,10 @@ inline Tensor softmax(const Tensor& x, int dim = 0) {
         }
     }
 
-    if (x.requires_grad()) {
+    if (grad_mode_enabled && x.requires_grad()) {
+
+        NoGradGuard no_grad;
+        
         std::shared_ptr<AutogradMeta> autograd_meta_x = x.autograd_meta;
 
         // save output — backward only needs the softmax output values,

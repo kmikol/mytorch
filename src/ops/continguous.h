@@ -54,7 +54,10 @@ inline Tensor contiguous(const Tensor& tensor) {
     Tensor out = ContiguousOp::forward(tensor);
 
     // wire into graph so gradient flows back through the copy
-    if (tensor.requires_grad()) {
+    if (grad_mode_enabled && tensor.requires_grad()) {
+        
+        NoGradGuard no_grad;
+
         out.autograd_meta = make_grad_meta(
             "contiguous",
             {tensor.autograd_meta},

@@ -40,7 +40,9 @@ inline Tensor relu(const Tensor& x) {
     Tensor out = ReluOp::forward(x);
 
     // --- backward ---
-    if (!x.requires_grad()) return out;
+    if (!grad_mode_enabled && !x.requires_grad()) return out;
+
+    NoGradGuard no_grad;
 
     Tensor saved_input = x.clone();
     out.autograd_meta = make_grad_meta(

@@ -55,7 +55,10 @@ inline Tensor matmul(const Tensor& A, const Tensor& B) {
     Tensor C = MatMulOp::forward(A, B);
 
     bool rA = A.requires_grad(), rB = B.requires_grad();
-    if (rA || rB) {
+    if (grad_mode_enabled && (rA || rB)) {
+        
+        NoGradGuard no_grad;
+        
         Tensor sA = A.clone(), sB = B.clone();
         auto mA = A.autograd_meta, mB = B.autograd_meta;
 

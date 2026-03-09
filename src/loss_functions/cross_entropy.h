@@ -149,7 +149,7 @@ inline Tensor cross_entropy_loss(const Tensor& logits, const Tensor& targets) {
 
     Tensor loss = CrossEntropyLossOp::forward(logits, targets);
 
-    if (logits.requires_grad()) {
+    if (grad_mode_enabled && logits.requires_grad()) {
         std::shared_ptr<AutogradMeta> autograd_meta_logits = logits.autograd_meta;
 
         Tensor saved_logits  = logits.clone();
