@@ -2,7 +2,6 @@
 #include <cmath>
 #include "tensorlib.h"
 #include "ops/ops.h"
-#include "activations/sigmoid.h"
 
 // ================================================================
 // forward

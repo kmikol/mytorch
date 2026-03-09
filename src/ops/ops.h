@@ -10,4 +10,5 @@
 
 #include "softmax.h"
 
-
+#include "activations/relu.h"
+#include "activations/sigmoid.h"
