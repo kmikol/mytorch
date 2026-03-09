@@ -27,7 +27,7 @@ target_include_directories(myml_lib PUBLIC src)
 
 add_library(myml_lib_cov ${LIB_SOURCES})
 target_include_directories(myml_lib_cov PUBLIC src)
-target_compile_options(myml_lib_cov PRIVATE --coverage -O0 -fno-inline)
+target_compile_options(myml_lib_cov PRIVATE --coverage -O3 -fno-inline)
 target_link_options(myml_lib_cov    PRIVATE --coverage)
 
 find_package(GTest REQUIRED)
@@ -40,7 +40,7 @@ add_executable(unit_tests ${UNIT_TEST_SOURCES})
 target_link_libraries(unit_tests PRIVATE myml_lib GTest::gtest_main)
 
 add_executable(unit_tests_cov ${UNIT_TEST_SOURCES})
-target_compile_options(unit_tests_cov PRIVATE --coverage -O0 -fno-inline)
+target_compile_options(unit_tests_cov PRIVATE --coverage -O3 -fno-inline)
 target_link_options(unit_tests_cov    PRIVATE --coverage)
 target_link_libraries(unit_tests_cov  PRIVATE myml_lib_cov GTest::gtest_main)
 
@@ -52,7 +52,7 @@ add_executable(smoke_tests ${SMOKE_TEST_SOURCES})
 target_link_libraries(smoke_tests PRIVATE myml_lib GTest::gtest_main)
 
 add_executable(smoke_tests_cov ${SMOKE_TEST_SOURCES})
-target_compile_options(smoke_tests_cov PRIVATE --coverage -O0 -fno-inline)
+target_compile_options(smoke_tests_cov PRIVATE --coverage -O3 -fno-inline)
 target_link_options(smoke_tests_cov    PRIVATE --coverage)
 target_link_libraries(smoke_tests_cov  PRIVATE myml_lib_cov GTest::gtest_main)
 
@@ -79,10 +79,10 @@ file(GLOB_RECURSE PROFILE_SOURCES
      "tests/profiling/*.cpp")
 
 add_executable(profile_mnist ${PROFILE_SOURCES})
-target_compile_options(profile_mnist PRIVATE -O2 -march=native -g -fno-omit-frame-pointer)
+target_compile_options(profile_mnist PRIVATE -O3 -march=native -g -fno-omit-frame-pointer)
 target_link_libraries(profile_mnist PRIVATE myml_lib)
 
 add_executable(profile_mnist_gprof ${PROFILE_SOURCES})
-target_compile_options(profile_mnist_gprof PRIVATE -O2 -march=native -pg)
+target_compile_options(profile_mnist_gprof PRIVATE -O3 -march=native -pg)
 target_link_options(profile_mnist_gprof    PRIVATE -pg)
 target_link_libraries(profile_mnist_gprof  PRIVATE myml_lib)
