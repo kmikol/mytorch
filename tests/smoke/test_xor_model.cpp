@@ -38,7 +38,7 @@
 #include "optim.h"
 #include "ops/ops.h"
 #include "activations/activations.h"
-#include "loss_functions/loss_functions.h"
+#include "loss_functions/mse.h"
 
 // ── constants ────────────────────────────────────────────────────────────────
 

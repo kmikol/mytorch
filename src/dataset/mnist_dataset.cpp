@@ -1,5 +1,3 @@
-// dataset/mnist_dataset.cpp
-
 #include "mnist_dataset.h"
 
 uint32_t MNISTDataset::read_be_uint32(std::ifstream& file)
