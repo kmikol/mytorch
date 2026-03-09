@@ -91,3 +91,49 @@ all_tests: unit_tests smoke_tests
 clean:
 	rm -f tests_bin
 	rm -rf build
+
+# ──────────────────────────────────────────────────────────────
+# gprof profiling targets  (add this block to your Makefile)
+#
+# Usage:
+#   make profile_gprof              # run 200 batches, print report
+#   make profile_gprof n_batches=500
+#   make profile_gprof_top          # flat profile only (top 20 fns)
+# ──────────────────────────────────────────────────────────────
+
+PROFILE_SOURCES = $(shell find tests/profiling -name "*.cpp")
+
+# ── build ──────────────────────────────────────────────────────
+
+build/profile_mnist_gprof: build/build.ninja $(SOURCES) $(HEADERS) $(PROFILE_SOURCES)
+	cmake --build build --target profile_mnist_gprof
+
+# ── run + full report ─────────────────────────────────────────
+# Runs the harness (gmon.out written automatically by the runtime),
+# then converts it to a human-readable report saved to
+# build/gprof_report.txt and printed to stdout.
+
+.PHONY: profile_gprof
+profile_gprof: build/profile_mnist_gprof
+	@echo "--- running harness (gmon.out will be written to cwd) ---"
+	MNIST_PATH=$(or $(MNIST_PATH),data/MNIST) \
+	  ./build/profile_mnist_gprof $(or $(n_batches),200)
+	@echo ""
+	@echo "--- generating gprof report → build/gprof_report.txt ---"
+	gprof ./build/profile_mnist_gprof gmon.out > build/gprof_report.txt
+	@echo ""
+	@echo "=== FLAT PROFILE (top 30 functions by self time) ==="
+	gprof -b ./build/profile_mnist_gprof gmon.out | head -50
+	@echo ""
+	@echo "Full report: build/gprof_report.txt"
+	@echo "View call graph with: gprof -b ./build/profile_mnist_gprof gmon.out | less"
+
+# ── flat profile only (quick glance) ─────────────────────────
+
+.PHONY: profile_gprof_top
+profile_gprof_top: build/profile_mnist_gprof
+	MNIST_PATH=$(or $(MNIST_PATH),data/MNIST) \
+	  ./build/profile_mnist_gprof $(or $(n_batches),200)
+	@echo ""
+	@echo "=== TOP 20 FUNCTIONS BY SELF TIME ==="
+	gprof -b -p ./build/profile_mnist_gprof gmon.out | head -30

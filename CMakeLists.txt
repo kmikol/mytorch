@@ -12,11 +12,11 @@ file(GLOB_RECURSE LIB_SOURCES "src/*.cpp")
 
 file(GLOB_RECURSE UNIT_TEST_SOURCES
      CONFIGURE_DEPENDS
-     "tests/unit/*.cpp")
+     "tests/unit/test_*.cpp")
 
 file(GLOB_RECURSE SMOKE_TEST_SOURCES
      CONFIGURE_DEPENDS
-     "tests/smoke/*.cpp")
+     "tests/smoke/test_*.cpp")
 
 # ──────────────────────────────────────────────────────────────
 # libraries
@@ -65,3 +65,24 @@ include(GoogleTest)
 
 gtest_discover_tests(unit_tests  PROPERTIES LABELS "unit")
 gtest_discover_tests(smoke_tests PROPERTIES LABELS "smoke")
+
+
+# ──────────────────────────────────────────────────────────────
+# gprof profiling binary  (add this block to your CMakeLists.txt)
+#
+# -pg instruments every function call; gprof reads gmon.out after.
+# Keep -O2 so the profile reflects realistic code, but -pg
+# disables inlining automatically where it needs to for accuracy.
+# ──────────────────────────────────────────────────────────────
+file(GLOB_RECURSE PROFILE_SOURCES
+     CONFIGURE_DEPENDS
+     "tests/profiling/*.cpp")
+
+add_executable(profile_mnist ${PROFILE_SOURCES})
+target_compile_options(profile_mnist PRIVATE -O2 -march=native -g -fno-omit-frame-pointer)
+target_link_libraries(profile_mnist PRIVATE myml_lib)
+
+add_executable(profile_mnist_gprof ${PROFILE_SOURCES})
+target_compile_options(profile_mnist_gprof PRIVATE -O2 -march=native -pg)
+target_link_options(profile_mnist_gprof    PRIVATE -pg)
+target_link_libraries(profile_mnist_gprof  PRIVATE myml_lib)
