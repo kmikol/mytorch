@@ -34,21 +34,24 @@ struct SigmoidOp {
 inline Tensor sigmoid(const Tensor& x) {
     assert(x.ndim() == 2);
 
-    // --- forward ---
     Tensor out = SigmoidOp::forward(x);
 
-    // --- backward ---
-    if (!grad_mode_enabled && !x.requires_grad()) return out;
+    if (grad_mode_enabled && x.requires_grad()) {
+        NoGradGuard no_grad;
 
-    NoGradGuard no_grad;
+        // capture implementation only — sigmoid needs the output values
+        // for its backward (s * (1 - s)), not the input
+        auto implOut = out.implementation;
 
-    Tensor saved_out = out.clone();
-    out.autograd_meta = make_grad_meta(
-        "sigmoid",
-        {x.autograd_meta},
-        [saved_out](const Tensor& grad) {
-            return SigmoidOp::backward(grad, saved_out);
-        });
+        out.autograd_meta = make_grad_meta(
+            "sigmoid",
+            {x.autograd_meta},
+            [implOut](const Tensor& grad) {
+                Tensor saved_out;
+                saved_out.implementation = implOut;
+                return SigmoidOp::backward(grad, saved_out);
+            });
+    }
 
     return out;
 }

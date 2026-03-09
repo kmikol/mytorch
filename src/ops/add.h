@@ -98,18 +98,20 @@ inline Tensor add(const Tensor& A, const Tensor& B) {
     Tensor C = AddOp::forward(A, B);
 
     bool rA = A.requires_grad(), rB = B.requires_grad();
-    if (!grad_mode_enabled || !(rA || rB)) return C;
+    if (grad_mode_enabled && (rA || rB)) {
+        NoGradGuard no_grad;
 
-    NoGradGuard no_grad;
+        // no tensors need saving — add backward only needs
+        // the broadcast info and column counts, captured by value
+        int64_t A_cols = A.shape(1), B_cols = B.shape(1);
 
-    int64_t A_cols = A.shape(1), B_cols = B.shape(1);
-
-    C.autograd_meta = make_grad_meta(
-        "add",
-        {A.autograd_meta, B.autograd_meta},
-        [rA, rB, info, A_cols, B_cols](const Tensor& grad) {
-            return AddOp::backward(grad, rA, rB, info, A_cols, B_cols);
-        });
+        C.autograd_meta = make_grad_meta(
+            "add",
+            {A.autograd_meta, B.autograd_meta},
+            [rA, rB, info, A_cols, B_cols](const Tensor& grad) {
+                return AddOp::backward(grad, rA, rB, info, A_cols, B_cols);
+            });
+    }
 
     return C;
 }

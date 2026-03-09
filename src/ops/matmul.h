@@ -56,16 +56,23 @@ inline Tensor matmul(const Tensor& A, const Tensor& B) {
 
     bool rA = A.requires_grad(), rB = B.requires_grad();
     if (grad_mode_enabled && (rA || rB)) {
-        
         NoGradGuard no_grad;
-        
-        Tensor sA = A.clone(), sB = B.clone();
-        auto mA = A.autograd_meta, mB = B.autograd_meta;
 
-        C.autograd_meta = make_grad_meta("matmul", {mA, mB},
-            [sA, sB, rA, rB](const Tensor& grad) {
+        // capture implementation only — not the full Tensor
+        // this avoids keeping the upstream graph alive through autograd_meta
+        auto implA = A.implementation;
+        auto implB = B.implementation;
+
+        C.autograd_meta = make_grad_meta(
+            "matmul",
+            {A.autograd_meta, B.autograd_meta},
+            [implA, implB, rA, rB](const Tensor& grad) {
+                // reconstruct bare tensors — no autograd_meta
+                Tensor sA; sA.implementation = implA;
+                Tensor sB; sB.implementation = implB;
                 return MatMulOp::backward(grad, sA, sB, rA, rB);
             });
     }
+
     return C;
 }
