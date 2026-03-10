@@ -66,5 +66,6 @@ struct Tensor {
     // ---- ops ----
     Tensor transpose(int dim0 = -2, int dim1 = -1) const;
     Tensor view(std::vector<int64_t> new_shape)     const;
+    Tensor reshape(std::vector<int64_t> new_shape)  const;
     Tensor contiguous()                              const;
 };

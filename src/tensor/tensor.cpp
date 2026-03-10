@@ -86,4 +86,5 @@ Tensor Tensor::clone() const {
 
 Tensor Tensor::transpose(int dim0, int dim1) const { return ::transpose(*this, dim0, dim1); }
 Tensor Tensor::view(std::vector<int64_t> new_shape) const { return ::view(*this, new_shape); }
+Tensor Tensor::reshape(std::vector<int64_t> new_shape) const { return ::reshape(*this, new_shape); }
 Tensor Tensor::contiguous() const { return ::contiguous(*this); }
