@@ -37,7 +37,6 @@
 #include "layers/linear.h"
 #include "optim.h"
 #include "ops/ops.h"
-#include "activations/activations.h"
 #include "loss_functions/mse.h"
 
 // ── constants ────────────────────────────────────────────────────────────────

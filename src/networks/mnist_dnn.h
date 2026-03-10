@@ -1,30 +1,36 @@
+// networks/mnist_dnn.h
 #pragma once
 #include "layers/linear.h"
-#include "activations/activations.h"
 #include "ops/ops.h"
+#include "optim.h"
 
-// three-layer DNN for MNIST
-// 784 → 256 → 128 → 10
-// hidden activations: relu
-// output: raw logits (cross_entropy_loss applies softmax internally)
-struct MnistDNN {
+class MnistDNN {
+public:
+    // input_size: number of features per sample (784 for 28x28, 196 for 14x14)
+    // num_classes: number of output classes (10 for MNIST)
+    explicit MnistDNN(int64_t input_size = 784, int64_t num_classes = 10)
+        : first_layer(input_size, 128)
+        , second_layer(128, 64)
+        , output_layer(64, num_classes)
+    {}
 
-    Linear l1{784, 128};
-    Linear l2{128, 64};
-    Linear l3{64,  10};
-
-    Tensor forward(const Tensor& x) {
-        // x: [784, N]
-        Tensor h1 = relu(l1.forward(x));    // [256, N]
-        Tensor h2 = relu(l2.forward(h1));   // [128, N]
-        return l3.forward(h2);              // [10,  N] — raw logits
+    Tensor forward(const Tensor& input) const {
+        Tensor hidden_one    = relu(first_layer.forward(input));
+        Tensor hidden_two    = relu(second_layer.forward(hidden_one));
+        Tensor logits        = output_layer.forward(hidden_two);
+        return logits;
     }
 
     std::vector<Tensor*> parameters() {
-        std::vector<Tensor*> params;
-        for (Tensor* p : l1.parameters()) params.push_back(p);
-        for (Tensor* p : l2.parameters()) params.push_back(p);
-        for (Tensor* p : l3.parameters()) params.push_back(p);
-        return params;
+        std::vector<Tensor*> all_parameters;
+        for (Tensor* parameter : first_layer.parameters())  all_parameters.push_back(parameter);
+        for (Tensor* parameter : second_layer.parameters()) all_parameters.push_back(parameter);
+        for (Tensor* parameter : output_layer.parameters()) all_parameters.push_back(parameter);
+        return all_parameters;
     }
+
+private:
+    Linear first_layer;
+    Linear second_layer;
+    Linear output_layer;
 };
