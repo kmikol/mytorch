@@ -9,8 +9,8 @@ struct TransposeOp {
     // forward: zero-copy view with swapped strides
     // dim0 and dim1 are the dimensions being swapped
     static Tensor forward(const Tensor& t, int dim0, int dim1) {
-        auto new_shape   = t.implementation->get_shape();
-        auto new_strides = t.implementation->get_strides();
+        auto new_shape   = t.shape();
+        auto new_strides = t.strides();
 
         std::swap(new_shape[dim0],   new_shape[dim1]);
         std::swap(new_strides[dim0], new_strides[dim1]);

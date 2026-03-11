@@ -39,7 +39,7 @@ void backward(Tensor& output) {
 
     // STEP 2: seed the output gradient with ones
     output.autograd_meta->grad = std::make_shared<Tensor>(
-        Tensor::ones(output.implementation->shape)
+        Tensor::ones(output.shape())
     );
 
     // STEP 3: reverse sweep

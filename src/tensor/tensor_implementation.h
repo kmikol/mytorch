@@ -97,9 +97,6 @@ struct TensorImpl {
 
     int ndim() const { return static_cast<int>(shape.size()); }
 
-    std::vector<int64_t> get_shape()   const { return shape;   }
-    std::vector<int64_t> get_strides() const { return strides; }
-
     bool is_contiguous() const {
         return strides == default_strides(shape);
     }

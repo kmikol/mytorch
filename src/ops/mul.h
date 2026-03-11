@@ -10,9 +10,9 @@ struct MulOp {
         Tensor C = Tensor::zeros({rows, cols});
 
         if (A.is_contiguous() && B.is_contiguous() && C.is_contiguous()) {
-            const float* a = A.implementation->storage->ptr();
-            const float* b = B.implementation->storage->ptr();
-            float*       c = C.implementation->storage->ptr();
+            const float* a = A.data_ptr();
+            const float* b = B.data_ptr();
+            float*       c = C.data_ptr();
 
             int64_t n = rows * cols;
             for (int64_t i = 0; i < n; ++i)

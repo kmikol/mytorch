@@ -75,7 +75,7 @@ Tensor Tensor::clone() const {
     if (this->is_contiguous()) {
         // fast path — contiguous tensors can be bulk-copied
         std::vector<float> new_data = implementation->storage->data;
-        return from_data(std::move(new_data), implementation->get_shape());
+        return from_data(std::move(new_data), shape());
     } else {
         // general path — materialise a contiguous copy element by element
         return this->contiguous();

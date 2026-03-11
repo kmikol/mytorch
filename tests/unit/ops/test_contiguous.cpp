@@ -87,8 +87,8 @@ TEST(ContiguousOpForward, OutputHasFreshStorageNotSharedWithInput) {
     Tensor output = ContiguousOp::forward(transposed);
 
     EXPECT_NE(
-        output.implementation->storage.get(),
-        transposed.implementation->storage.get()
+        output.data_ptr(),
+        transposed.data_ptr()
     );
 }
 
@@ -103,7 +103,7 @@ TEST(ContiguousOpForward, OutputStorageIsPackedRowMajor) {
     Tensor transposed = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3}).transpose();
     Tensor output = ContiguousOp::forward(transposed);
 
-    float* raw_storage_pointer = output.implementation->storage->ptr();
+    float* raw_storage_pointer = output.data_ptr();
     EXPECT_FLOAT_EQ(raw_storage_pointer[0], 1.f);
     EXPECT_FLOAT_EQ(raw_storage_pointer[1], 4.f);
     EXPECT_FLOAT_EQ(raw_storage_pointer[2], 2.f);
@@ -118,9 +118,11 @@ TEST(ContiguousOpForward, OutputHasDefaultStridesForItsShape) {
     Tensor transposed = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3}).transpose();
     Tensor output = ContiguousOp::forward(transposed);
 
+    std::vector<int64_t> strides = output.strides();
+
     // shape {3, 2} → default strides {2, 1}
-    EXPECT_EQ(output.implementation->strides[0], 2);
-    EXPECT_EQ(output.implementation->strides[1], 1);
+    EXPECT_EQ(strides[0], 2);
+    EXPECT_EQ(strides[1], 1);
 }
 
 TEST(ContiguousOpForward, WorksCorrectlyOn3DInput) {
@@ -184,8 +186,8 @@ TEST(ContiguousOpBackward, ReturnedGradientHasFreshStorage) {
     std::vector<Tensor> gradients = ContiguousOp::backward(incoming_gradient);
 
     EXPECT_NE(
-        gradients[0].implementation->storage.get(),
-        incoming_gradient.implementation->storage.get()
+        gradients[0].data_ptr(),
+        incoming_gradient.data_ptr()
     );
 }
 
@@ -214,8 +216,8 @@ TEST(ContiguousFastPath, AlreadyContiguousTensorIsReturnedAsView) {
 
     // same storage pointer confirms no allocation took place
     EXPECT_EQ(
-        output.implementation->storage.get(),
-        input.implementation->storage.get()
+        output.data_ptr(),
+        input.data_ptr()
     );
 }
 
@@ -265,8 +267,8 @@ TEST(ContiguousFastPath, WorksForZerosTensor) {
     Tensor output = contiguous(input);
 
     EXPECT_EQ(
-        output.implementation->storage.get(),
-        input.implementation->storage.get()
+        output.data_ptr(),
+        input.data_ptr()
     );
 }
 
@@ -294,8 +296,8 @@ TEST(ContiguousSlowPath, OutputStorageDiffersFromInputStorage) {
     Tensor output = contiguous(transposed);
 
     EXPECT_NE(
-        output.implementation->storage.get(),
-        transposed.implementation->storage.get()
+        output.data_ptr(),
+        transposed.data_ptr()
     );
 }
 
@@ -328,8 +330,10 @@ TEST(ContiguousSlowPath, OutputHasDefaultStridesForShape) {
     Tensor transposed = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3}).transpose();
     Tensor output = contiguous(transposed);
 
-    EXPECT_EQ(output.implementation->strides[0], 2);
-    EXPECT_EQ(output.implementation->strides[1], 1);
+    std::vector<int64_t> strides = output.strides();
+
+    EXPECT_EQ(strides[0], 2);
+    EXPECT_EQ(strides[1], 1);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -417,8 +421,8 @@ TEST(ContiguousIdempotency, CallingTwiceDoesNotAllocateAdditionalStorage) {
 
     // second call is a fast path — same storage as first result
     EXPECT_EQ(
-        second_result.implementation->storage.get(),
-        first_result.implementation->storage.get()
+        second_result.data_ptr(),
+        first_result.data_ptr()
     );
 }
 

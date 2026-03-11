@@ -8,17 +8,17 @@ struct ContiguousOp {
     // returns a new tensor with default strides
     static Tensor forward(const Tensor& t) {
         auto new_storage = std::make_shared<Storage>(t.numel());
-        std::vector<int64_t> new_strides = default_strides(t.implementation->shape);
+        std::vector<int64_t> new_strides = default_strides(t.shape());
 
         auto new_impl = std::make_shared<TensorImpl>(
             new_storage,
-            t.implementation->shape,
+            t.shape(),
             new_strides,
             0
         );
 
-        const auto& shape   = t.implementation->shape;
-        const auto& strides = t.implementation->strides;
+        const auto& shape   = t.shape();
+        const auto& strides = t.strides();
         const size_t offset = t.implementation->offset;
         const float* src    = t.implementation->storage->ptr();
         float*       dst    = new_storage->ptr();

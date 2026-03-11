@@ -29,6 +29,13 @@ struct Tensor {
     int64_t shape(int dim) const;
     int64_t stride(int dim) const;
 
+    std::vector<int64_t> shape () const {
+        return implementation->shape;
+    }
+    std::vector<int64_t> strides() const {
+        return implementation->strides;
+    }
+
     // ---- raw data access — use in op loops ----
     // Only valid for contiguous tensors. Caller is responsible for
     // computing flat indices via stride(d).

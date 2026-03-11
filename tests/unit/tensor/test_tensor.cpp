@@ -20,8 +20,8 @@
 //                                double-transposed, clone of non-contiguous
 //   9.  Autograd metadata      — requires_grad flag, has_grad before backward,
 //                                independence between tensors
-//  10.  Internal strides       — verify implementation->strides directly
-//                                (documents the contract TensorImpl depends on)
+//  10.  Internal strides       — verify strides 
+//                                
 //
 // What is NOT tested here:
 //   - default_strides() and TensorImpl::at()  →  test_tensor_impl.cpp
@@ -284,7 +284,7 @@ TEST(TensorReadWrite, WriteIsVisibleThroughRawStoragePointer) {
     Tensor tensor = Tensor::zeros({2, 3});
     tensor.at(1, 0) = 55.f;
 
-    EXPECT_FLOAT_EQ(tensor.implementation->storage->ptr()[3], 55.f);
+    EXPECT_FLOAT_EQ(tensor.data_ptr()[3], 55.f);
 }
 
 TEST(TensorReadWrite, MultipleDistinctWritesDoNotInterfere) {
@@ -313,8 +313,8 @@ TEST(TensorIndependence, SeparateTensorsHaveDifferentStoragePointers) {
     Tensor tensor_b = Tensor::from_data({1, 2, 3, 4}, {2, 2});
 
     EXPECT_NE(
-        tensor_a.implementation->storage.get(),
-        tensor_b.implementation->storage.get()
+        tensor_a.data_ptr(),
+        tensor_b.data_ptr()
     );
 }
 
@@ -333,8 +333,8 @@ TEST(TensorIndependence, TwoZerosTensorsHaveDifferentStoragePointers) {
     Tensor tensor_b = Tensor::zeros({3, 3});
 
     EXPECT_NE(
-        tensor_a.implementation->storage.get(),
-        tensor_b.implementation->storage.get()
+        tensor_a.data_ptr(),
+        tensor_b.data_ptr()
     );
 }
 
@@ -380,8 +380,8 @@ TEST(TensorClone, ClonedTensorHasDifferentStoragePointer) {
     Tensor cloned   = original.clone();
 
     EXPECT_NE(
-        cloned.implementation->storage.get(),
-        original.implementation->storage.get()
+        cloned.data_ptr(),
+        original.data_ptr()
     );
 }
 
@@ -492,8 +492,8 @@ TEST(TensorTranspose, StoragePointerIsSharedZeroCopy) {
     Tensor transposed = original.transpose();
 
     EXPECT_EQ(
-        transposed.implementation->storage.get(),
-        original.implementation->storage.get()
+        transposed.data_ptr(),
+        original.data_ptr()
     );
 }
 
@@ -672,7 +672,7 @@ TEST(TensorAutogradMeta, ClonedTensorDoesNotInheritRequiresGrad) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 10.  Internal strides  (implementation->strides)
+// 10.  Internal strides  (strides)
 //
 // Strides are the bridge between Tensor's logical shape and TensorImpl's
 // element-access arithmetic.  We inspect them directly here so that if a
@@ -688,27 +688,33 @@ TEST(TensorInternalStrides, DefaultStridesFor2DShape) {
     // shape {3, 4} → row-major strides must be {4, 1}
     Tensor tensor = Tensor::zeros({3, 4});
 
-    EXPECT_EQ(tensor.implementation->strides[0], 4);
-    EXPECT_EQ(tensor.implementation->strides[1], 1);
+    std::vector<int64_t> strides = tensor.strides();
+
+    EXPECT_EQ(strides[0], 4);
+    EXPECT_EQ(strides[1], 1);
 }
 
 TEST(TensorInternalStrides, DefaultStridesFor3DShape) {
     // shape {2, 3, 4} → strides must be {12, 4, 1}
     Tensor tensor = Tensor::zeros({2, 3, 4});
 
-    EXPECT_EQ(tensor.implementation->strides[0], 12);
-    EXPECT_EQ(tensor.implementation->strides[1],  4);
-    EXPECT_EQ(tensor.implementation->strides[2],  1);
+    std::vector<int64_t> strides = tensor.strides();
+
+    EXPECT_EQ(strides[0], 12);
+    EXPECT_EQ(strides[1],  4);
+    EXPECT_EQ(strides[2],  1);
 }
 
 TEST(TensorInternalStrides, DefaultStridesFor4DShape) {
     // shape {2, 3, 4, 5} → strides must be {60, 20, 5, 1}
     Tensor tensor = Tensor::zeros({2, 3, 4, 5});
 
-    EXPECT_EQ(tensor.implementation->strides[0], 60);
-    EXPECT_EQ(tensor.implementation->strides[1], 20);
-    EXPECT_EQ(tensor.implementation->strides[2],  5);
-    EXPECT_EQ(tensor.implementation->strides[3],  1);
+    std::vector<int64_t> strides = tensor.strides();
+
+    EXPECT_EQ(strides[0], 60);
+    EXPECT_EQ(strides[1], 20);
+    EXPECT_EQ(strides[2],  5);
+    EXPECT_EQ(strides[3],  1);
 }
 
 TEST(TensorInternalStrides, TransposeSwapsStrides) {
@@ -718,16 +724,20 @@ TEST(TensorInternalStrides, TransposeSwapsStrides) {
     Tensor original   = Tensor::zeros({2, 3});
     Tensor transposed = original.transpose();
 
-    EXPECT_EQ(transposed.implementation->strides[0], 1);
-    EXPECT_EQ(transposed.implementation->strides[1], 3);
+    std::vector<int64_t> strides = transposed.strides();
+
+    EXPECT_EQ(strides[0], 1);
+    EXPECT_EQ(strides[1], 3);
 }
 
 TEST(TensorInternalStrides, DoubleTransposeRestoresOriginalStrides) {
     Tensor original          = Tensor::zeros({2, 3});
     Tensor double_transposed = original.transpose().transpose();
 
-    EXPECT_EQ(double_transposed.implementation->strides[0], 3);
-    EXPECT_EQ(double_transposed.implementation->strides[1], 1);
+    std::vector<int64_t> strides = double_transposed.strides();
+
+    EXPECT_EQ(strides[0], 3);
+    EXPECT_EQ(strides[1], 1);
 }
 
 TEST(TensorInternalStrides, CloneOfTransposedTensorHasDefaultStrides) {
@@ -736,6 +746,8 @@ TEST(TensorInternalStrides, CloneOfTransposedTensorHasDefaultStrides) {
     Tensor transposed = Tensor::zeros({2, 3}).transpose();   // shape {3,2}
     Tensor cloned     = transposed.clone();
 
-    EXPECT_EQ(cloned.implementation->strides[0], 2);
-    EXPECT_EQ(cloned.implementation->strides[1], 1);
+    std::vector<int64_t> strides = cloned.strides();
+
+    EXPECT_EQ(strides[0], 2);
+    EXPECT_EQ(strides[1], 1);
 }
