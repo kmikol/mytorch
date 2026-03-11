@@ -32,6 +32,11 @@ target_link_options(myml_lib_cov    PRIVATE --coverage)
 
 find_package(GTest REQUIRED)
 
+find_package(OpenMP REQUIRED)
+
+target_link_libraries(myml_lib      PUBLIC OpenMP::OpenMP_CXX)
+target_link_libraries(myml_lib_cov  PUBLIC OpenMP::OpenMP_CXX)
+
 # ──────────────────────────────────────────────────────────────
 # unit test binaries
 # ──────────────────────────────────────────────────────────────

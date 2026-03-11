@@ -75,7 +75,7 @@ static Tensor onehot_to_indices(const Tensor& onehot) {
 int main(int argc, char* argv[]) {
 
     // ---- config ------------------------------------------------
-    std::string mnist_path = env_str("MNIST_PATH", "data/MNIST");
+    std::string mnist_path = "data/MNIST";
     int   n_batches  = env_int  ("N_BATCHES",  200);
     int   batch_size = env_int  ("BATCH_SIZE",  64);
     float lr         = env_float("LR",         0.01f);

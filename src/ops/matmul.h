@@ -1,4 +1,6 @@
 #pragma once
+
+#include <omp.h>
 #include <vector>
 #include "tensorlib.h"
 
@@ -54,8 +56,9 @@ struct MatMulOp {
         int64_t sA0 = A.stride(0), sA1 = A.stride(1);
         int64_t sB0 = B.stride(0), sB1 = B.stride(1);
 
-        constexpr int64_t T = 256;  // tile size — tune to L1 cache size
+        constexpr int64_t T = 64;  // tile size — tune to L1 cache size
 
+        #pragma omp parallel for schedule(dynamic) collapse(2)
         for (int64_t m0 = 0; m0 < M; m0 += T)
         for (int64_t n0 = 0; n0 < N; n0 += T)
         for (int64_t k0 = 0; k0 < K; k0 += T) {

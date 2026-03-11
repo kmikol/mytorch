@@ -1,6 +1,9 @@
 CXX      = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra
 
+CXXFLAGS += -fopenmp
+LDFLAGS  += -fopenmp
+
 HEADERS  = $(shell find src -name "*.h")
 SOURCES  = $(shell find src -name "*.cpp")
 
@@ -116,8 +119,7 @@ build/profile_mnist_gprof: build/build.ninja $(SOURCES) $(HEADERS) $(PROFILE_SOU
 .PHONY: profile_gprof
 profile_gprof: build/profile_mnist_gprof
 	@echo "--- running harness (gmon.out will be written to cwd) ---"
-	MNIST_PATH=$(or $(MNIST_PATH),data/MNIST) \
-	  ./build/profile_mnist_gprof $(or $(n_batches),200)
+	  ./build/profile_mnist_gprof $(or $(n_batches),1000)
 	@echo ""
 	@echo "--- generating gprof report → build/gprof_report.txt ---"
 	gprof ./build/profile_mnist_gprof gmon.out > build/gprof_report.txt
