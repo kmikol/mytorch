@@ -24,6 +24,9 @@
 //   ./build/bench_ops --op sigmoid --mode backward --size 1024
 
 #include <algorithm>
+#ifdef HAVE_BLAS
+#include <cblas.h>
+#endif
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -181,6 +184,30 @@ static void bench_matmul(const std::string& mode, size_t N,
     // matmul FLOPs: 2 * N^3 (forward); backward does 2 matmuls → 4 * N^3
     const double flops = (mode == "forward" ? 2.0 : 4.0) * N * N * N;
     print_gflops(r, flops);
+
+    // ── BLAS reference (forward only) ─────────────────────────
+#ifdef HAVE_BLAS
+    if (mode == "forward") {
+        // cblas_sgemm: C = alpha * A @ B + beta * C
+        std::vector<float> ca(N * N), cb(N * N), cc(N * N, 0.f);
+        for (size_t i = 0; i < N * N; ++i) {
+            ca[i] = A.storage->data[i];
+            cb[i] = B.storage->data[i];
+        }
+        BenchResult rb = run_bench(iters, warmup, [&] {
+            cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
+                        static_cast<int>(N), static_cast<int>(N), static_cast<int>(N),
+                        1.f, ca.data(), static_cast<int>(N),
+                             cb.data(), static_cast<int>(N),
+                        0.f, cc.data(), static_cast<int>(N));
+        });
+        const double blas_gflops = flops / (rb.mean_ms * 1e-3) / 1e9;
+        const double our_gflops  = flops / (r.mean_ms  * 1e-3) / 1e9;
+        std::printf("  BLAS mean   : %8.3f ms  (%.2f GFLOP/s)\n",
+                    rb.mean_ms, blas_gflops);
+        std::printf("  vs BLAS     : %8.1f %%\n", 100.0 * our_gflops / blas_gflops);
+    }
+#endif
     std::printf("  ─────────────────────────────\n");
 }
 

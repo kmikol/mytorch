@@ -42,6 +42,7 @@ target_link_options(myml_lib_cov    PRIVATE --coverage)
 
 find_package(GTest REQUIRED)
 find_package(OpenMP REQUIRED)
+find_package(BLAS)  # optional — enables BLAS reference in bench_ops when present
 
 target_link_libraries(myml_lib      PUBLIC OpenMP::OpenMP_CXX)
 target_link_libraries(myml_lib_cov  PUBLIC OpenMP::OpenMP_CXX)
@@ -138,6 +139,10 @@ target_link_libraries(bench_mnist  PRIVATE myml_lib)
 add_executable(bench_ops tests/profiling/bench_ops.cpp)
 target_compile_options(bench_ops PRIVATE -O3 -march=native -fno-omit-frame-pointer)
 target_link_libraries(bench_ops  PRIVATE myml_lib)
+if(BLAS_FOUND)
+    target_compile_definitions(bench_ops PRIVATE HAVE_BLAS)
+    target_link_libraries(bench_ops PRIVATE ${BLAS_LIBRARIES})
+endif()
 
 # Run the full MNIST training-loop benchmark.
 add_custom_target(run_bench_mnist
