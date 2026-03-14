@@ -48,7 +48,7 @@ size_t argmax_row(const Tensor& x, size_t row) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    const int epochs = (argc > 1) ? std::max(1, std::atoi(argv[1])) : 10;
+    const int epochs = (argc > 1) ? std::max(1, std::atoi(argv[1])) : 5;
     const size_t batch_size = 64;
     const float learning_rate = 0.1f;
 
@@ -74,11 +74,12 @@ int main(int argc, char** argv) {
     const size_t num_classes = probe_targets.shape_at(1);
 
     Linear l1(input_features, 128);
-    Linear l2(128, num_classes);
+    Linear l2(128, 64);
+    Linear l3(64, num_classes);
 
     std::vector<Tensor*> params = l1.parameters();
-    const auto p2 = l2.parameters();
-    params.insert(params.end(), p2.begin(), p2.end());
+    for (Tensor* p : l2.parameters()) params.push_back(p);
+    for (Tensor* p : l3.parameters()) params.push_back(p);
     SGD optim(params, learning_rate);
 
     std::cout << "Training on full MNIST"
@@ -101,8 +102,9 @@ int main(int argc, char** argv) {
         while (loader.has_next()) {
             auto [inputs, targets] = loader.next_batch();
 
-            Tensor h = relu(l1.forward(inputs));
-            Tensor logits = l2.forward(h);
+            Tensor h1     = relu(l1.forward(inputs));
+            Tensor h2     = relu(l2.forward(h1));
+            Tensor logits = l3.forward(h2);
 
             Tensor loss = cross_entropy(logits, targets);
             epoch_loss_sum += loss(0);

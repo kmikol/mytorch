@@ -121,7 +121,8 @@ static std::vector<uint8_t> read_image_pixels_prefix(const std::string& image_pa
 
 class ToyDataset final : public Dataset {
 public:
-    ToyDataset(size_t sample_count, size_t input_features, size_t target_features) {
+    ToyDataset(size_t sample_count, size_t input_features, size_t target_features)
+        : input_features_(input_features), target_features_(target_features) {
         samples.reserve(sample_count);
         for (size_t i = 0; i < sample_count; ++i) {
             Tensor input = Tensor::zeros(make_shape_2d(1, input_features), 2);
@@ -137,17 +138,26 @@ public:
         }
     }
 
-    size_t size() const override {
-        return samples.size();
-    }
+    size_t size()        const override { return samples.size(); }
+    size_t input_dim()   const override { return input_features_; }
+    size_t target_dim()  const override { return target_features_; }
 
     Sample get(size_t index) const override {
         assert(index < samples.size());
         return samples[index];
     }
 
+    void fill_sample(size_t index, float* input_buf, float* target_buf) const override {
+        assert(index < samples.size());
+        const Sample& s = samples[index];
+        for (size_t f = 0; f < input_features_;  ++f) input_buf[f]  = s.input(0, f);
+        for (size_t f = 0; f < target_features_; ++f) target_buf[f] = s.target(0, f);
+    }
+
 private:
     std::vector<Sample> samples;
+    size_t input_features_;
+    size_t target_features_;
 };
 
 static std::vector<size_t> collect_batch_order(DataLoader& loader) {
@@ -214,8 +224,8 @@ static void verify_split_with_real_files(const std::string& folder,
     EXPECT_EQ(ds.size(), static_cast<size_t>(ih.count));
     EXPECT_EQ(ds.image_rows(), expected_rows);
     EXPECT_EQ(ds.image_cols(), expected_cols);
-    EXPECT_EQ(ds.input_size(), static_cast<size_t>(expected_rows) * static_cast<size_t>(expected_cols));
-    EXPECT_EQ(ds.num_classes(), 10u);
+    EXPECT_EQ(ds.input_dim(),  static_cast<size_t>(expected_rows) * static_cast<size_t>(expected_cols));
+    EXPECT_EQ(ds.target_dim(), 10u);
 
     ASSERT_GT(ds.size(), 2u);
 

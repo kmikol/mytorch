@@ -33,4 +33,9 @@ private:
     std::vector<size_t> indices;
     size_t position;
     std::mt19937 rng;
+
+    // Cached at construction via dataset.input_dim() / target_dim() so that
+    // next_batch() can pre-allocate without calling dataset.get() at all.
+    size_t input_dim_;
+    size_t target_dim_;
 };

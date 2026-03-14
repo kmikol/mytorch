@@ -20,7 +20,9 @@ DataLoader::DataLoader(const Dataset& dataset,
       batch_size(batch_size),
       shuffle(shuffle),
       position(0),
-      rng(seed) {
+      rng(seed),
+      input_dim_(dataset.input_dim()),
+      target_dim_(dataset.target_dim()) {
     assert(batch_size > 0);
 
     size_t n = dataset.size();
@@ -48,33 +50,20 @@ void DataLoader::reset() {
 std::pair<Tensor, Tensor> DataLoader::next_batch() {
     assert(has_next());
 
-    size_t end = std::min(position + batch_size, indices.size());
-    size_t current_batch = end - position;
+    const size_t end = std::min(position + batch_size, indices.size());
+    const size_t B   = end - position;
 
-    Sample first = dataset.get(indices[position]);
-    assert(first.input.ndim == 2 && first.target.ndim == 2);
-    assert(first.input.shape[0] == 1 && first.target.shape[0] == 1);
+    // Pre-allocate batch tensors once — no per-sample Tensor allocation.
+    Tensor inputs  = Tensor::zeros(make_shape_2d(B, input_dim_),  2);
+    Tensor targets = Tensor::zeros(make_shape_2d(B, target_dim_), 2);
 
-    size_t input_features = first.input.shape[1];
-    size_t target_features = first.target.shape[1];
+    float* inp = inputs.storage->data;
+    float* tgt = targets.storage->data;
 
-    Tensor inputs = Tensor::zeros(make_shape_2d(current_batch, input_features), 2);
-    Tensor targets = Tensor::zeros(make_shape_2d(current_batch, target_features), 2);
-
-    for (size_t b = 0; b < current_batch; ++b) {
-        Sample s = dataset.get(indices[position + b]);
-
-        assert(s.input.ndim == 2 && s.target.ndim == 2);
-        assert(s.input.shape[0] == 1 && s.target.shape[0] == 1);
-        assert(s.input.shape[1] == input_features);
-        assert(s.target.shape[1] == target_features);
-
-        for (size_t f = 0; f < input_features; ++f)
-            inputs(b, f) = s.input(0, f);
-
-        for (size_t f = 0; f < target_features; ++f)
-            targets(b, f) = s.target(0, f);
-    }
+    for (size_t b = 0; b < B; ++b)
+        dataset.fill_sample(indices[position + b],
+                            inp + b * input_dim_,
+                            tgt + b * target_dim_);
 
     position = end;
     return {inputs, targets};

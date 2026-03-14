@@ -63,16 +63,22 @@ Tensor matmul(const Tensor& A, const Tensor& B) {
 
     Tensor C = MatMulOp::forward(A, B);
 
-    if (grad_mode_enabled && (A.requires_grad() || B.requires_grad())) {
-        // Capture A and B by value: Tensor copies share the same
-        // shared_ptr<Storage>, so this is a zero-copy view of each input.
-        // Safe as long as no in-place mutations are made to A or B after
-        // this call.
+    bool rA = A.requires_grad();
+    bool rB = B.requires_grad();
+
+    if (grad_mode_enabled && (rA || rB)) {
+        std::vector<std::shared_ptr<AutogradMeta>> active_metas;
+        if (rA) active_metas.push_back(A.autograd_meta);
+        if (rB) active_metas.push_back(B.autograd_meta);
+
         C.autograd_meta = make_grad_meta(
             "matmul",
-            {A.autograd_meta, B.autograd_meta},
-            [a_save = A, b_save = B](const Tensor& grad) {
-                return MatMulOp::backward(grad, a_save, b_save);
+            std::move(active_metas),
+            [a_save = A, b_save = B, rA, rB](const Tensor& grad) {
+                std::vector<Tensor> grads;
+                if (rA) grads.push_back(MatMulOp::forward(grad,        b_save.T()));
+                if (rB) grads.push_back(MatMulOp::forward(a_save.T(),  grad));
+                return grads;
             }
         );
     }

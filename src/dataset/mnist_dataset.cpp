@@ -1,6 +1,8 @@
 #include "dataset/mnist_dataset.h"
 
+#include <algorithm>
 #include <cassert>
+#include <cstring>
 #include <fstream>
 
 
@@ -81,4 +83,18 @@ Sample MNISTDataset::get(size_t index) const {
     target(0, labels[index]) = 1.f;
 
     return {input, target};
+}
+
+
+void MNISTDataset::fill_sample(size_t index,
+                               float* input_buf,
+                               float* target_buf) const {
+    assert(index < images.size());
+
+    // Direct copy — no Tensor allocation, no element-wise operator() overhead.
+    std::copy(images[index].begin(), images[index].end(), input_buf);
+
+    // One-hot encode directly into caller's buffer.
+    std::fill(target_buf, target_buf + 10u, 0.f);
+    target_buf[labels[index]] = 1.f;
 }

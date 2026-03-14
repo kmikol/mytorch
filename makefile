@@ -150,46 +150,72 @@ clean:
 	rm -rf $(BUILD_DEBUG) $(BUILD_OPT)
 
 # ──────────────────────────────────────────────────────────────
-# gprof profiling targets  (add this block to your Makefile)
+# profiling targets for main.cpp (gprof)
 #
-# Usage:
-#   make profile_gprof              # run 200 batches, print report
-#   make profile_gprof n_batches=500
-#   make profile_gprof_top          # flat profile only (top 20 fns)
+#   make profile_gprof     [profile_epochs=3]   # flat profile + call-graph
+#   make profile_gprof_top [profile_epochs=3]   # top-20 functions only
+#
+# Default: profile_epochs=3
+# Uses the optimised build (O3 + OpenMP) so the profile is representative.
 # ──────────────────────────────────────────────────────────────
 
-PROFILE_SOURCES = $(shell find tests/profiling -name "*.cpp")
+profile_epochs ?= 3
 
-# ── build ──────────────────────────────────────────────────────
+$(BUILD_OPT)/profile_main_gprof: $(BUILD_OPT)/build.ninja $(SOURCES) $(HEADERS) main.cpp
+	cmake --build $(BUILD_OPT) --target profile_main_gprof
 
-$(BUILD_DEBUG)/profile_mnist_gprof: $(BUILD_DEBUG)/build.ninja $(SOURCES) $(HEADERS) $(PROFILE_SOURCES)
-	cmake --build $(BUILD_DEBUG) --target profile_mnist_gprof
-
-# ── run + full report ─────────────────────────────────────────
-# Runs the harness (gmon.out written automatically by the runtime),
-# then converts it to a human-readable report saved to
-# build/gprof_report.txt and printed to stdout.
+# ── run + full flat profile + call-graph ──────────────────────
 
 .PHONY: profile_gprof
-profile_gprof: $(BUILD_DEBUG)/profile_mnist_gprof
-	@echo "--- running harness (gmon.out will be written to cwd) ---"
-	  ./$(BUILD_DEBUG)/profile_mnist_gprof $(or $(n_batches),1000)
+profile_gprof: $(BUILD_OPT)/profile_main_gprof
+	./$(BUILD_OPT)/profile_main_gprof $(profile_epochs)
+	gprof -b $(BUILD_OPT)/profile_main_gprof gmon.out > $(BUILD_OPT)/gprof_report.txt
 	@echo ""
-	@echo "--- generating gprof report → $(BUILD_DEBUG)/gprof_report.txt ---"
-	gprof ./$(BUILD_DEBUG)/profile_mnist_gprof gmon.out > $(BUILD_DEBUG)/gprof_report.txt
+	@echo "=== FLAT PROFILE (top 30 by self time) ==="
+	gprof -b -p $(BUILD_OPT)/profile_main_gprof gmon.out | head -35
 	@echo ""
-	@echo "=== FLAT PROFILE (top 30 functions by self time) ==="
-	gprof -b ./$(BUILD_DEBUG)/profile_mnist_gprof gmon.out | head -50
-	@echo ""
-	@echo "Full report: $(BUILD_DEBUG)/gprof_report.txt"
-	@echo "View call graph with: gprof -b ./$(BUILD_DEBUG)/profile_mnist_gprof gmon.out | less"
+	@echo "Full report: $(BUILD_OPT)/gprof_report.txt"
 
-# ── flat profile only (quick glance) ─────────────────────────
+# ── top-20 flat profile only (quick glance) ───────────────────
 
 .PHONY: profile_gprof_top
-profile_gprof_top: $(BUILD_DEBUG)/profile_mnist_gprof
-	MNIST_PATH=$(or $(MNIST_PATH),data/MNIST) \
-	  ./$(BUILD_DEBUG)/profile_mnist_gprof $(or $(n_batches),200)
+profile_gprof_top: $(BUILD_OPT)/profile_main_gprof
+	./$(BUILD_OPT)/profile_main_gprof $(profile_epochs)
 	@echo ""
 	@echo "=== TOP 20 FUNCTIONS BY SELF TIME ==="
-	gprof -b -p ./$(BUILD_DEBUG)/profile_mnist_gprof gmon.out | head -30
+	gprof -b -p $(BUILD_OPT)/profile_main_gprof gmon.out | head -25
+
+# ──────────────────────────────────────────────────────────────
+# MNIST training throughput benchmark
+#
+#   make bench_mnist [batches=200] [batch_size=64]
+# ──────────────────────────────────────────────────────────────
+
+batches    ?= 200
+batch_size ?= 64
+
+$(BUILD_OPT)/bench_mnist: $(BUILD_OPT)/build.ninja $(SOURCES) $(HEADERS) tests/profiling/bench_mnist.cpp
+	cmake --build $(BUILD_OPT) --target bench_mnist
+
+.PHONY: bench_mnist
+bench_mnist: $(BUILD_OPT)/bench_mnist
+	N_BATCHES=$(batches) BATCH_SIZE=$(batch_size) ./$(BUILD_OPT)/bench_mnist
+
+# ──────────────────────────────────────────────────────────────
+# op microbenchmarks
+#
+#   make bench op=matmul mode=forward [size=512] [iters=100]
+#   make bench op=relu   mode=backward
+# ──────────────────────────────────────────────────────────────
+
+op   ?= matmul
+mode ?= forward
+size ?= 512
+iters ?= 100
+
+$(BUILD_OPT)/bench_ops: $(BUILD_OPT)/build.ninja $(SOURCES) $(HEADERS) tests/profiling/bench_ops.cpp
+	cmake --build $(BUILD_OPT) --target bench_ops
+
+.PHONY: bench
+bench: $(BUILD_OPT)/bench_ops
+	./$(BUILD_OPT)/bench_ops --op $(op) --mode $(mode) --size $(size) --iters $(iters)
