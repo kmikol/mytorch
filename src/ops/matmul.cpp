@@ -17,48 +17,69 @@ Tensor MatMulOp::forward(const Tensor& A, const Tensor& B) {
     Shape out_shape{};
     out_shape[0] = M;
     out_shape[1] = N;
-    Tensor C = Tensor::zeros(out_shape, 2);  // zero-init so += accumulation is correct
+    // Zero-initialised so the += accumulation in every path is correct from
+    // the first step without a separate zeroing pass.
+    Tensor C = Tensor::zeros(out_shape, 2);
 
-    float*       c   = C.storage->data;                 // contiguous, offset = 0
-    const float* a   = A.storage->data + A.offset;
-    const float* b   = B.storage->data + B.offset;
+    float*       c = C.storage->data;
+    const float* a = A.storage->data + A.offset;
+    const float* b = B.storage->data + B.offset;
 
-    // Cache strides once — avoids repeated indirection in the inner loop.
-    // Contiguous A: sA0 = K, sA1 = 1.  Transposed A: sA0 = 1, sA1 = K.
+    // Read strides once into locals.  A tensor produced by .T() has its two
+    // stride values swapped but the underlying data is unchanged, so using
+    // strides here lets the same kernel handle both normal and transposed
+    // inputs without any data copy.
+    //   Contiguous [M×K]:  sA0=K, sA1=1  → A[m,k] = a[m*K + k]
+    //   Transposed [K×M]:  sA0=1, sA1=K  → A[m,k] = a[m*1 + k*K]  (same memory)
     size_t sA0 = A.strides[0], sA1 = A.strides[1];
     size_t sB0 = B.strides[0], sB1 = B.strides[1];
 
 #ifdef __ARM_NEON
-    // ── NEON register micro-kernel (B contiguous in n, sB1 == 1) ──────────
+    // ── NEON register micro-kernel ────────────────────────────────────────
     //
-    // Tile: MR=4 rows × NR=16 cols.  The 4×4 = 16 accumulator float32x4_t
-    // registers stay live for the entire K loop — C is loaded once and stored
-    // once per output tile, eliminating the load-add-store on every k step
-    // that the scalar path does.
+    // Only entered when B is contiguous in the column direction (sB1 == 1),
+    // which is true for any normal (non-transposed) matrix.  The backward
+    // pass always passes a transposed B so it falls through to the scalar
+    // path below.
     //
-    // K is blocked in steps of KB to keep the B panel (KB×16 floats = 16 KB
-    // at KB=256) resident in L1.  A strip (4×KB = 4 KB) fits alongside it.
+    // Core idea — eliminate the C memory round-trip on every k step:
+    //   Scalar path does per k:  load C[m,n]  →  add  →  store C[m,n]
+    //   Micro-kernel does:       load C tile ONCE → K×FMAs in registers → store ONCE
     //
-    // OMP parallelises over (m0, n0) cache tiles of size T×T.
+    // Output tile size: MR=4 rows × NR=16 cols = 64 floats.
+    // That requires 16 float32x4_t accumulator registers (c00..c33).
+    // ARM has 32 NEON registers total, leaving 16 for A broadcasts and B loads.
     if (sB1 == 1) {
-        constexpr size_t MR = 4;
-        constexpr size_t NR = 16;
-        constexpr size_t T  = 64;   // OMP tile — small enough for parallelism at any N
-        constexpr size_t KB = 256;  // k-blocking inside micro-kernel (L1 reuse of B)
+        constexpr size_t MR = 4;    // rows processed per micro-kernel call
+        constexpr size_t NR = 16;   // cols processed per micro-kernel call (4 NEON regs × 4 floats)
+        constexpr size_t T  = 64;   // OMP tile size — (N/T)² work items, must be ≥ parallelism needed
+        constexpr size_t KB = 256;  // k-strip size — keeps B panel (KB×NR×4 = 16 KB) in L1
 
+        // Parallelise over (m0, n0) output tiles.  collapse(2) flattens the
+        // two loops into one index space so OMP sees (M/T)×(N/T) independent
+        // items and can distribute them evenly.  schedule(static) pre-assigns
+        // items to threads without a work queue — valid because every tile
+        // covers exactly T×T output elements (uniform work).
         #pragma omp parallel for schedule(static) collapse(2)
         for (size_t m0 = 0; m0 < M; m0 += T)
         for (size_t n0 = 0; n0 < N; n0 += T) {
             const size_t m_end  = std::min(m0 + T, M);
             const size_t n_end  = std::min(n0 + T, N);
+            // Last row/col that starts a full MR/NR-wide tile.
+            // Rows m_full..m_end and cols n_full..n_end are handled by the
+            // scalar edge loops below.
             const size_t m_full = m0 + (m_end - m0) / MR * MR;
             const size_t n_full = n0 + (n_end - n0) / NR * NR;
 
-            // ── full MR×NR tiles ─────────────────────────────────────────
+            // ── full MR×NR micro-kernel tiles ─────────────────────────────
             for (size_t m = m0; m < m_full; m += MR)
             for (size_t n = n0; n < n_full; n += NR) {
 
-                // Load C tile into 16 accumulator registers (one load each).
+                // Load the 4×16 output tile from C into 16 NEON registers.
+                // Naming: c{row}{col_group}, col_group 0..3 covers n+[0..3],
+                // n+[4..7], n+[8..11], n+[12..15] respectively.
+                // This is the ONLY time C is read for this tile; all K
+                // accumulation happens in these registers without touching memory.
                 float32x4_t c00 = vld1q_f32(c + (m+0)*N + n +  0);
                 float32x4_t c01 = vld1q_f32(c + (m+0)*N + n +  4);
                 float32x4_t c02 = vld1q_f32(c + (m+0)*N + n +  8);
@@ -76,15 +97,28 @@ Tensor MatMulOp::forward(const Tensor& A, const Tensor& B) {
                 float32x4_t c32 = vld1q_f32(c + (m+3)*N + n +  8);
                 float32x4_t c33 = vld1q_f32(c + (m+3)*N + n + 12);
 
-                // Accumulate over all K, blocked by KB for L1 reuse of B.
+                // Accumulate over all K, blocked in strips of KB.
+                // Without blocking the B panel per micro-kernel call would be
+                // K×NR×4 bytes (64 KB at K=1024), evicting A from L1 mid-loop.
+                // With KB=256 the B strip is 16 KB and the A strip is 4 KB —
+                // both fit in L1 together.  The accumulators above stay live
+                // across all k0i iterations; they are never spilled.
                 for (size_t k0i = 0; k0i < K; k0i += KB) {
                     const size_t k_end = std::min(k0i + KB, K);
                     for (size_t k = k0i; k < k_end; ++k) {
+                        // Load 16 consecutive B values from row k.
+                        // sB1==1 guarantees these are contiguous in memory, so
+                        // each pair of loads shares one 64-byte cache line.
                         const float32x4_t b0 = vld1q_f32(b + k*sB0 + n +  0);
                         const float32x4_t b1 = vld1q_f32(b + k*sB0 + n +  4);
                         const float32x4_t b2 = vld1q_f32(b + k*sB0 + n +  8);
                         const float32x4_t b3 = vld1q_f32(b + k*sB0 + n + 12);
 
+                        // Broadcast A[m+i, k] into all 4 lanes of a NEON register,
+                        // then FMA against the four B vectors.
+                        // All four output rows reuse the same b0..b3 — loading B
+                        // once for MR=4 rows is the register-blocking payoff.
+                        // vfmaq_f32(acc, a, b) computes acc + a*b for all 4 lanes.
                         const float32x4_t a0 = vdupq_n_f32(a[(m+0)*sA0 + k*sA1]);
                         c00 = vfmaq_f32(c00, a0, b0);
                         c01 = vfmaq_f32(c01, a0, b1);
@@ -111,7 +145,8 @@ Tensor MatMulOp::forward(const Tensor& A, const Tensor& B) {
                     }
                 }
 
-                // Store C tile back (one store each).
+                // Write the fully-accumulated tile back to C.
+                // This is the ONLY write for this 4×16 region across all K steps.
                 vst1q_f32(c + (m+0)*N + n +  0, c00);
                 vst1q_f32(c + (m+0)*N + n +  4, c01);
                 vst1q_f32(c + (m+0)*N + n +  8, c02);
@@ -130,7 +165,8 @@ Tensor MatMulOp::forward(const Tensor& A, const Tensor& B) {
                 vst1q_f32(c + (m+3)*N + n + 12, c33);
             }
 
-            // ── scalar edge: right strip (N not divisible by NR) ─────────
+            // ── scalar edge: right strip (N not divisible by NR=16) ───────
+            // Covers columns n_full..n_end for every row in this OMP tile.
             if (n_full < n_end) {
                 for (size_t m = m0; m < m_end; ++m)
                 for (size_t k = 0; k < K; ++k) {
@@ -140,7 +176,9 @@ Tensor MatMulOp::forward(const Tensor& A, const Tensor& B) {
                 }
             }
 
-            // ── scalar edge: bottom strip (M not divisible by MR) ────────
+            // ── scalar edge: bottom strip (M not divisible by MR=4) ───────
+            // Covers rows m_full..m_end, but only columns n0..n_full to avoid
+            // double-processing the bottom-right corner (already handled above).
             if (m_full < m_end) {
                 for (size_t m = m_full; m < m_end; ++m)
                 for (size_t k = 0; k < K; ++k) {
@@ -154,9 +192,21 @@ Tensor MatMulOp::forward(const Tensor& A, const Tensor& B) {
     }
 #endif
 
-    // ── Scalar fallback — handles non-contiguous B (e.g. transposed inputs) ──
+    // ── Scalar fallback ───────────────────────────────────────────────────
+    //
+    // Used when B is non-contiguous in the column direction (sB1 != 1), which
+    // happens whenever B is transposed — i.e. on every backward pass.
+    //
+    // Three-level cache tiling: the working set per iteration is three T×T
+    // tiles ≈ 3×64×64×4 = 48 KB, which fits in L1 and avoids evicting A or B
+    // before all their values have been reused.
+    //
+    // Inner loop order is m-k-n: hoisting a[m,k] outside the n loop saves one
+    // load per (m,k) pair instead of one per (m,k,n) triple.
     constexpr size_t T = 64;
 
+    // schedule(dynamic) because boundary tiles can be smaller than T×T,
+    // making work per item uneven — dynamic assignment keeps threads busy.
     #pragma omp parallel for schedule(dynamic) collapse(2)
     for (size_t m0 = 0; m0 < M; m0 += T)
     for (size_t n0 = 0; n0 < N; n0 += T)
