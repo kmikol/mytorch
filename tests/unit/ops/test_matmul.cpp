@@ -183,6 +183,26 @@ TEST_F(MatMulTransposedInput, TransposedSecondInput) {
     EXPECT_FLOAT_EQ(R(1,1), 4.f);
 }
 
+// Both inputs transposed: A.T() @ B.T()
+// This tests the interaction of two non-contiguous stride patterns simultaneously.
+TEST_F(MatMulTransposedInput, BothInputsTransposed) {
+    // A = [[1,2],[3,4]]  A.T() = [[1,3],[2,4]]
+    // B = [[5,6],[7,8]]  B.T() = [[5,7],[6,8]]
+    // A.T() @ B.T() = [[1*5+3*6, 1*7+3*8], [2*5+4*6, 2*7+4*8]]
+    //               = [[23, 31], [34, 46]]
+    auto A = make_tensor({1,2,3,4}, {2,2});
+    auto B = make_tensor({5,6,7,8}, {2,2});
+
+    ASSERT_FALSE(A.T().is_contiguous());
+    ASSERT_FALSE(B.T().is_contiguous());
+
+    auto R = MatMulOp::forward(A.T(), B.T());
+    EXPECT_FLOAT_EQ(R(0,0), 23.f);
+    EXPECT_FLOAT_EQ(R(0,1), 31.f);
+    EXPECT_FLOAT_EQ(R(1,0), 34.f);
+    EXPECT_FLOAT_EQ(R(1,1), 46.f);
+}
+
 TEST_F(MatMulTransposedInput, ContiguousAndTransposedAgree) {
     // Logical matrix X = [[1,2,3],[4,5,6]].
     // Stored column-major as X_col = [[1,4],[2,5],[3,6]] — then X_col.T() gives X.
@@ -421,4 +441,44 @@ TEST_F(MatMulAutogradTest, ForwardValuesUnchangedAfterBackward) {
     EXPECT_FLOAT_EQ(C(0,1), c01);
     EXPECT_FLOAT_EQ(C(1,0), c10);
     EXPECT_FLOAT_EQ(C(1,1), c11);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 6. MatMulTilingTest — tiling boundary conditions
+//
+// The kernel tiles with T=64.  Shapes that cross a tile boundary (e.g. 65)
+// exercise the min(m0+T, M) clamping in all three loop dimensions.
+// ════════════════════════════════════════════════════════════════════════════
+
+class MatMulTilingTest : public ::testing::Test {};
+
+// A filled-with-ones [65×65] times itself gives [65×65] filled with 65.
+// This covers the case where M, N, and K each require exactly two tile
+// iterations (tile 0..63 and remainder 64..64), exercising the boundary clamp.
+TEST_F(MatMulTilingTest, ShapeJustAboveTileBoundary) {
+    constexpr size_t N = 65;
+    auto A = Tensor::ones(make_shape({N, N}), 2);
+    auto B = Tensor::ones(make_shape({N, N}), 2);
+    auto C = MatMulOp::forward(A, B);
+
+    EXPECT_EQ(C.shape_at(0), N);
+    EXPECT_EQ(C.shape_at(1), N);
+    for (size_t i = 0; i < N; ++i)
+        for (size_t j = 0; j < N; ++j)
+            EXPECT_FLOAT_EQ(C(i, j), static_cast<float>(N))
+                << "mismatch at [" << i << "," << j << "]";
+}
+
+// Extreme aspect ratio: tall-times-wide ([1×K] @ [K×1] = [1×1] scalar matmul).
+// Exercises the case where M=1 and N=1 so no tiling occurs in those dims,
+// but K may span many tiles.
+TEST_F(MatMulTilingTest, ExtremeAspectRatioRowTimesColumn) {
+    constexpr size_t K = 256;
+    auto A = Tensor::ones(make_shape({1, K}), 2);
+    auto B = Tensor::ones(make_shape({K, 1}), 2);
+    auto C = MatMulOp::forward(A, B);
+
+    EXPECT_EQ(C.shape_at(0), 1u);
+    EXPECT_EQ(C.shape_at(1), 1u);
+    EXPECT_FLOAT_EQ(C(0, 0), static_cast<float>(K));
 }

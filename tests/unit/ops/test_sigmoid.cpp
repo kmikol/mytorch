@@ -179,3 +179,52 @@ TEST_F(SigmoidAutogradTest, ForwardValuesUnchangedByBackward) {
     EXPECT_FLOAT_EQ(z(0), v0);
     EXPECT_FLOAT_EQ(z(2), v2);
 }
+
+// ─────────────────────────────────────────────
+// Non-contiguous inputs (stride-aware paths)
+// ─────────────────────────────────────────────
+
+class SigmoidNonContiguousTest : public ::testing::Test {};
+
+// A transposed view exercises the stride-aware slow path in SigmoidOp::forward.
+TEST_F(SigmoidNonContiguousTest, ForwardOnTransposedInput) {
+    // x = [[0, 100],[-100, 0]]  shape [2,2]
+    // x.T() = [[0,-100],[100,0]]  shape [2,2], non-contiguous
+    // sigmoid(x.T()): 0→0.5, -100≈0, 100≈1, 0→0.5
+    auto x = Tensor::zeros(make_shape({2, 2}), 2);
+    x(0,0)= 0.f; x(0,1)= 100.f;
+    x(1,0)=-100.f; x(1,1)= 0.f;
+    auto xt = x.T();
+
+    ASSERT_FALSE(xt.is_contiguous());
+    auto out = SigmoidOp::forward(xt);
+
+    EXPECT_NEAR(out(0,0), 0.5f,  1e-5f);   // sigmoid(0)
+    EXPECT_NEAR(out(0,1), 0.f,   1e-4f);   // sigmoid(-100) ≈ 0
+    EXPECT_NEAR(out(1,0), 1.f,   1e-4f);   // sigmoid(100)  ≈ 1
+    EXPECT_NEAR(out(1,1), 0.5f,  1e-5f);   // sigmoid(0)
+}
+
+// ─────────────────────────────────────────────
+// Boundary / numerical stability
+// ─────────────────────────────────────────────
+
+class SigmoidBoundaryTest : public ::testing::Test {};
+
+TEST_F(SigmoidBoundaryTest, ZeroUpstreamGradGivesZeroInputGrad) {
+    // dL/dx = 0 * σ(x)(1-σ(x)) = 0, regardless of the output value.
+    auto out  = make_tensor({4}, {0.1f, 0.5f, 0.9f, 0.99f});
+    auto grad = Tensor::zeros(make_shape({4}), 1);
+    auto gx   = SigmoidOp::backward(grad, out);
+    for (size_t i = 0; i < 4; ++i)
+        EXPECT_FLOAT_EQ(gx(i), 0.f);
+}
+
+TEST_F(SigmoidBoundaryTest, VeryNegativeInputDoesNotUnderflow) {
+    // exp(-(-1000)) overflows to inf without numerical care.
+    // sigmoid(-1000) should be finite and very close to 0.
+    auto x   = make_tensor({1}, {-1000.f});
+    auto out = SigmoidOp::forward(x);
+    EXPECT_TRUE(std::isfinite(out(0)));
+    EXPECT_NEAR(out(0), 0.f, 1e-4f);
+}

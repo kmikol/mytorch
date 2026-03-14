@@ -164,6 +164,15 @@ TEST_F(ReLUAutogradTest, AllNegativeGivesZeroGrad) {
         EXPECT_FLOAT_EQ(x.grad()(i), 0.f);
 }
 
+TEST_F(ReLUAutogradTest, ZeroUpstreamGradGivesZeroInputGrad) {
+    // If the seed gradient is zero, dL/dx must be zero everywhere regardless of sign.
+    auto x    = make_tensor({4}, {-2.f, -1.f, 1.f, 2.f}, /*requires_grad=*/true);
+    auto grad = Tensor::zeros(make_shape({4}), 1);
+    auto gx   = ReLUOp::backward(grad, x);
+    for (size_t i = 0; i < 4; ++i)
+        EXPECT_FLOAT_EQ(gx(i), 0.f);
+}
+
 TEST_F(ReLUAutogradTest, ForwardValuesUnchangedByBackward) {
     auto x = make_tensor({3}, {-1.f, 0.f, 2.f}, /*requires_grad=*/true);
     auto z = relu(x);
@@ -173,4 +182,69 @@ TEST_F(ReLUAutogradTest, ForwardValuesUnchangedByBackward) {
     backward(z);
     EXPECT_FLOAT_EQ(z(0), 0.f);
     EXPECT_FLOAT_EQ(z(2), 2.f);
+}
+
+// ─────────────────────────────────────────────
+// Non-contiguous inputs (stride-aware paths)
+// ─────────────────────────────────────────────
+
+class ReLUNonContiguousTest : public ::testing::Test {};
+
+// A transposed view exercises the stride-aware slow path inside ReLUOp::forward.
+TEST_F(ReLUNonContiguousTest, ForwardOnTransposedInput) {
+    // x = [[1,-1],[2,-2]]  shape [2,2]
+    // x.T() = [[1,2],[-1,-2]]  shape [2,2], non-contiguous
+    // relu(x.T()) = [[1,2],[0,0]]
+    auto x = Tensor::zeros(make_shape({2, 2}), 2);
+    x(0,0)=1.f; x(0,1)=-1.f;
+    x(1,0)=2.f; x(1,1)=-2.f;
+    auto xt = x.T();
+
+    ASSERT_FALSE(xt.is_contiguous());
+    auto out = ReLUOp::forward(xt);
+
+    EXPECT_FLOAT_EQ(out(0,0), 1.f);
+    EXPECT_FLOAT_EQ(out(0,1), 2.f);
+    EXPECT_FLOAT_EQ(out(1,0), 0.f);
+    EXPECT_FLOAT_EQ(out(1,1), 0.f);
+}
+
+// Backward must read x through its strides when x is non-contiguous.
+TEST_F(ReLUNonContiguousTest, BackwardOnTransposedInput) {
+    auto x = Tensor::zeros(make_shape({2, 2}), 2);
+    x(0,0)=1.f; x(0,1)=-1.f;
+    x(1,0)=2.f; x(1,1)=-2.f;
+    auto xt = x.T();  // xt[0,0]=1, xt[0,1]=2, xt[1,0]=-1, xt[1,1]=-2
+
+    auto grad = Tensor::ones(make_shape({2, 2}), 2);
+    auto gx   = ReLUOp::backward(grad, xt);
+
+    EXPECT_FLOAT_EQ(gx(0,0), 1.f);   // xt[0,0]=1  > 0
+    EXPECT_FLOAT_EQ(gx(0,1), 1.f);   // xt[0,1]=2  > 0
+    EXPECT_FLOAT_EQ(gx(1,0), 0.f);   // xt[1,0]=-1 <= 0
+    EXPECT_FLOAT_EQ(gx(1,1), 0.f);   // xt[1,1]=-2 <= 0
+}
+
+// ─────────────────────────────────────────────
+// Boundary values
+// ─────────────────────────────────────────────
+
+class ReLUBoundaryTest : public ::testing::Test {};
+
+TEST_F(ReLUBoundaryTest, ExactlyZeroIsClampedToZero) {
+    auto x   = make_tensor({1}, {0.f});
+    auto out = ReLUOp::forward(x);
+    EXPECT_FLOAT_EQ(out(0), 0.f);
+}
+
+TEST_F(ReLUBoundaryTest, SmallNegativeIsClampedToZero) {
+    auto x   = make_tensor({1}, {-1e-10f});
+    auto out = ReLUOp::forward(x);
+    EXPECT_FLOAT_EQ(out(0), 0.f);
+}
+
+TEST_F(ReLUBoundaryTest, SmallPositivePassesThrough) {
+    auto x   = make_tensor({1}, {1e-10f});
+    auto out = ReLUOp::forward(x);
+    EXPECT_FLOAT_EQ(out(0), 1e-10f);
 }

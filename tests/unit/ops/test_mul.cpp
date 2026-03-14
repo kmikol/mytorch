@@ -268,6 +268,72 @@ TEST_F(MulOpAutogradTest, OnlyOneInputRequiresGrad) {
     EXPECT_FALSE(b.has_grad());
 }
 
+// ─────────────────────────────────────────────
+// Non-contiguous inputs (stride-aware paths)
+// ─────────────────────────────────────────────
+
+class MulOpNonContiguousTest : public ::testing::Test {};
+
+// Transposing a [2,3] tensor produces a non-contiguous [2,3] view.
+// MulOp::forward must read via actual strides, not a flat offset assumption.
+TEST_F(MulOpNonContiguousTest, ForwardWithTransposedInput) {
+    // A  = [[1,2,3],[4,5,6]]  shape [2,3]  (contiguous)
+    // B  = [[10,20],[30,40],[50,60]]  shape [3,2]  (contiguous)
+    // B.T() = [[10,30,50],[20,40,60]]  shape [2,3]  (non-contiguous)
+    // A * B.T() = [[10,60,150],[80,200,360]]
+    auto a = Tensor::zeros(make_shape({2, 3}), 2);
+    a(0,0)=1; a(0,1)=2; a(0,2)=3;
+    a(1,0)=4; a(1,1)=5; a(1,2)=6;
+
+    auto b_row = Tensor::zeros(make_shape({3, 2}), 2);
+    b_row(0,0)=10; b_row(0,1)=20;
+    b_row(1,0)=30; b_row(1,1)=40;
+    b_row(2,0)=50; b_row(2,1)=60;
+    auto b = b_row.T();  // non-contiguous [2,3]
+
+    ASSERT_FALSE(b.is_contiguous());
+
+    auto out = MulOp::forward(a, b);
+
+    EXPECT_FLOAT_EQ(out(0,0), 10.f);
+    EXPECT_FLOAT_EQ(out(0,1), 60.f);
+    EXPECT_FLOAT_EQ(out(0,2), 150.f);
+    EXPECT_FLOAT_EQ(out(1,0), 80.f);
+    EXPECT_FLOAT_EQ(out(1,1), 200.f);
+    EXPECT_FLOAT_EQ(out(1,2), 360.f);
+}
+
+// backward must also apply the correct strides when a_save / b_save are non-contiguous.
+TEST_F(MulOpNonContiguousTest, BackwardWithTransposedSavedInput) {
+    auto a_row = Tensor::zeros(make_shape({3, 2}), 2);
+    a_row(0,0)=2; a_row(0,1)=3;
+    a_row(1,0)=4; a_row(1,1)=5;
+    a_row(2,0)=6; a_row(2,1)=7;
+    auto a = a_row.T();  // non-contiguous [2,3]: a[i,j] = a_row[j,i]
+
+    auto b = Tensor::zeros(make_shape({2, 3}), 2);
+    b(0,0)=1; b(0,1)=1; b(0,2)=1;
+    b(1,0)=1; b(1,1)=1; b(1,2)=1;
+
+    auto grad = Tensor::ones(make_shape({2, 3}), 2);
+
+    // grad_a = grad * b = ones * ones = a (since b=ones, grad_a = a's values)
+    // grad_b = grad * a_transposed_values
+    auto [grad_a, grad_b] = [&] {
+        auto v = MulOp::backward(grad, a, b);
+        return std::make_pair(v[0], v[1]);
+    }();
+
+    // a(0,0)=a_row(0,0)=2, a(0,1)=a_row(1,0)=4, a(0,2)=a_row(2,0)=6
+    // a(1,0)=a_row(0,1)=3, a(1,1)=a_row(1,1)=5, a(1,2)=a_row(2,1)=7
+    EXPECT_FLOAT_EQ(grad_b(0,0), 2.f);
+    EXPECT_FLOAT_EQ(grad_b(0,1), 4.f);
+    EXPECT_FLOAT_EQ(grad_b(0,2), 6.f);
+    EXPECT_FLOAT_EQ(grad_b(1,0), 3.f);
+    EXPECT_FLOAT_EQ(grad_b(1,1), 5.f);
+    EXPECT_FLOAT_EQ(grad_b(1,2), 7.f);
+}
+
 TEST_F(MulOpAutogradTest, ForwardValuesNotAffectedByBackward) {
     auto s = make_shape({3});
     auto a = Tensor::zeros(s, 1, /*requires_grad=*/true);
