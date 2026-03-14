@@ -1,205 +1,315 @@
 #include <gtest/gtest.h>
-#include "tensorlib.h"
-#include "ops/ops.h"
+#include <cstddef>
 
-// ═══════════════════════════════════════════════════════════════
-// 1. MulOpForward — shape and value correctness
-// ═══════════════════════════════════════════════════════════════
+#include "ops/mul.h"   // pulls in autograd.h → tensor.h
 
-TEST(MulOpForward, OutputShapeMatchesInputs) {
-    Tensor A = Tensor::zeros({2,3});
-    Tensor B = Tensor::zeros({2,3});
+// ─────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────
 
-    Tensor C = MulOp::forward(A,B);
-
-    EXPECT_EQ(C.shape(0),2);
-    EXPECT_EQ(C.shape(1),3);
+static Shape make_shape(std::initializer_list<size_t> dims) {
+    Shape s{};
+    size_t i = 0;
+    for (size_t d : dims) s[i++] = d;
+    return s;
 }
 
-TEST(MulOpForward, OutputNdimIsTwo) {
-    Tensor A = Tensor::zeros({2,2});
-    Tensor B = Tensor::zeros({2,2});
+// ─────────────────────────────────────────────
+// MulOp::forward — pure computation, no autograd
+// ─────────────────────────────────────────────
 
-    Tensor C = MulOp::forward(A,B);
+class MulOpForwardTest : public ::testing::Test {};
 
-    EXPECT_EQ(C.ndim(),2);
+TEST_F(MulOpForwardTest, ElementWise1D) {
+    auto s = make_shape({4});
+    auto a = Tensor::zeros(s, 1);
+    auto b = Tensor::zeros(s, 1);
+    for (size_t i = 0; i < 4; ++i) a.flat(i) = static_cast<float>(i + 1);  // 1 2 3 4
+    for (size_t i = 0; i < 4; ++i) b.flat(i) = 2.0f;
+
+    auto out = MulOp::forward(a, b);
+
+    EXPECT_EQ(out.numel, 4u);
+    EXPECT_FLOAT_EQ(out.flat(0), 2.0f);
+    EXPECT_FLOAT_EQ(out.flat(1), 4.0f);
+    EXPECT_FLOAT_EQ(out.flat(2), 6.0f);
+    EXPECT_FLOAT_EQ(out.flat(3), 8.0f);
 }
 
-TEST(MulOpForward, ComputesCorrectValues) {
-    Tensor A = Tensor::from_data({1,2,3,4},{2,2});
-    Tensor B = Tensor::from_data({5,6,7,8},{2,2});
+TEST_F(MulOpForwardTest, ElementWise2D) {
+    auto s = make_shape({2, 3});
+    auto a = Tensor::zeros(s, 2);
+    auto b = Tensor::zeros(s, 2);
+    for (size_t i = 0; i < 6; ++i) a.flat(i) = static_cast<float>(i);
+    for (size_t i = 0; i < 6; ++i) b.flat(i) = static_cast<float>(i) * 2.0f;
 
-    Tensor C = MulOp::forward(A,B);
+    auto out = MulOp::forward(a, b);
 
-    EXPECT_FLOAT_EQ(C.at(0,0),5.f);
-    EXPECT_FLOAT_EQ(C.at(0,1),12.f);
-    EXPECT_FLOAT_EQ(C.at(1,0),21.f);
-    EXPECT_FLOAT_EQ(C.at(1,1),32.f);
+    for (size_t i = 0; i < 6; ++i)
+        EXPECT_FLOAT_EQ(out.flat(i), static_cast<float>(i) * static_cast<float>(i) * 2.0f);
 }
 
-TEST(MulOpForward, MultiplyByZeroProducesZero) {
-    Tensor A = Tensor::from_data({1,2,3,4},{2,2});
-    Tensor Z = Tensor::zeros({2,2});
-
-    Tensor C = MulOp::forward(A,Z);
-
-    for(int r=0;r<2;r++)
-        for(int c=0;c<2;c++)
-            EXPECT_FLOAT_EQ(C.at(r,c),0.f);
+TEST_F(MulOpForwardTest, OutputShapeMatchesInput) {
+    auto s = make_shape({3, 4});
+    auto out = MulOp::forward(Tensor::ones(s, 2), Tensor::ones(s, 2));
+    EXPECT_EQ(out.ndim, 2u);
+    EXPECT_EQ(out.shape_at(0), 3u);
+    EXPECT_EQ(out.shape_at(1), 4u);
 }
 
-TEST(MulOpForward, MultiplyByOneLeavesTensorUnchanged) {
-    Tensor A = Tensor::from_data({1,2,3,4},{2,2});
-    Tensor O = Tensor::from_data({1,1,1,1},{2,2});
-
-    Tensor C = MulOp::forward(A,O);
-
-    for(int r=0;r<2;r++)
-        for(int c=0;c<2;c++)
-            EXPECT_FLOAT_EQ(C.at(r,c),A.at(r,c));
+TEST_F(MulOpForwardTest, OnesTimesOnesIsOnes) {
+    auto s = make_shape({4, 4});
+    auto out = MulOp::forward(Tensor::ones(s, 2), Tensor::ones(s, 2));
+    for (size_t i = 0; i < out.numel; ++i)
+        EXPECT_FLOAT_EQ(out.flat(i), 1.0f);
 }
 
-TEST(MulOpForward, OutputIsContiguous) {
-    Tensor A = Tensor::from_data({1,2,3,4},{2,2});
-    Tensor B = Tensor::from_data({5,6,7,8},{2,2});
-
-    Tensor C = MulOp::forward(A,B);
-
-    EXPECT_TRUE(C.is_contiguous());
+TEST_F(MulOpForwardTest, ZeroTimesAnythingIsZero) {
+    auto s = make_shape({4});
+    auto a = Tensor::zeros(s, 1);
+    auto b = Tensor::ones(s, 1);
+    for (size_t i = 0; i < 4; ++i) b.flat(i) = static_cast<float>(i * 100);
+    auto out = MulOp::forward(a, b);
+    for (size_t i = 0; i < out.numel; ++i)
+        EXPECT_FLOAT_EQ(out.flat(i), 0.0f);
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 2. Fast path (contiguous)
-// ═══════════════════════════════════════════════════════════════
-
-TEST(MulForwardFastPath, BothInputsContiguous) {
-
-    Tensor A = Tensor::from_data({1,2,3,4},{2,2});
-    Tensor B = Tensor::from_data({5,6,7,8},{2,2});
-
-    ASSERT_TRUE(A.is_contiguous());
-    ASSERT_TRUE(B.is_contiguous());
-
-    Tensor C = MulOp::forward(A,B);
-
-    EXPECT_FLOAT_EQ(C.at(1,1),32.f);
+TEST_F(MulOpForwardTest, ShapeMismatchNdimAsserts) {
+    EXPECT_DEATH(MulOp::forward(Tensor::ones(make_shape({4}), 1),
+                                Tensor::ones(make_shape({2, 2}), 2)), "");
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 3. Slow path (non-contiguous)
-// ═══════════════════════════════════════════════════════════════
-
-TEST(MulForwardSlowPath, NonContiguousInput) {
-
-    Tensor A = Tensor::from_data({1,3,2,4},{2,2});
-    Tensor AT = A.transpose();
-
-    Tensor B = Tensor::from_data({5,6,7,8},{2,2});
-
-    ASSERT_FALSE(AT.is_contiguous());
-
-    Tensor C = MulOp::forward(AT,B);
-
-    EXPECT_FLOAT_EQ(C.at(0,0),1*5);
-    EXPECT_FLOAT_EQ(C.at(1,1),4*8);
+TEST_F(MulOpForwardTest, ShapeMismatchDimAsserts) {
+    EXPECT_DEATH(MulOp::forward(Tensor::ones(make_shape({4}), 1),
+                                Tensor::ones(make_shape({3}), 1)), "");
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 4. Backward values in isolation
-// ═══════════════════════════════════════════════════════════════
-
-TEST(MulOpBackward, ReturnsTwoGradients) {
-
-    Tensor A = Tensor::from_data({1,2,3,4},{2,2});
-    Tensor B = Tensor::from_data({5,6,7,8},{2,2});
-    Tensor grad = Tensor::from_data({1,1,1,1},{2,2});
-
-    auto g = MulOp::backward(grad,A,B,true,true);
-
-    EXPECT_EQ(g.size(),2u);
+TEST_F(MulOpForwardTest, AlwaysProducesNoMeta) {
+    // forward is pure computation — autograd wiring is mul()'s responsibility.
+    auto s = make_shape({4});
+    auto out = MulOp::forward(Tensor::ones(s, 1, /*requires_grad=*/true),
+                              Tensor::ones(s, 1, /*requires_grad=*/true));
+    EXPECT_EQ(out.autograd_meta, nullptr);
 }
 
-TEST(MulOpBackward, GradientForAIsGradTimesB) {
+// ─────────────────────────────────────────────
+// MulOp::backward — pure gradient computation
+// ─────────────────────────────────────────────
 
-    Tensor A = Tensor::from_data({1,2,3,4},{2,2});
-    Tensor B = Tensor::from_data({5,6,7,8},{2,2});
-    Tensor grad = Tensor::from_data({1,1,1,1},{2,2});
+class MulOpBackwardTest : public ::testing::Test {};
 
-    auto g = MulOp::backward(grad,A,B,true,true);
+TEST_F(MulOpBackwardTest, GradAEqualsGradTimesB) {
+    // With unit upstream gradient: dL/da = 1 * b = b
+    auto s = make_shape({4});
+    auto a = Tensor::zeros(s, 1);
+    auto b = Tensor::zeros(s, 1);
+    for (size_t i = 0; i < 4; ++i) { a.flat(i) = static_cast<float>(i + 1);
+                                      b.flat(i) = static_cast<float>((i + 1) * 10); }
 
-    EXPECT_FLOAT_EQ(g[0].at(0,0),5.f);
-    EXPECT_FLOAT_EQ(g[0].at(0,1),6.f);
-    EXPECT_FLOAT_EQ(g[0].at(1,0),7.f);
-    EXPECT_FLOAT_EQ(g[0].at(1,1),8.f);
+    auto grads = MulOp::backward(Tensor::ones(s, 1), a, b);
+
+    for (size_t i = 0; i < 4; ++i)
+        EXPECT_FLOAT_EQ(grads[0].flat(i), b.flat(i));
 }
 
-TEST(MulOpBackward, GradientForBIsGradTimesA) {
+TEST_F(MulOpBackwardTest, GradBEqualsGradTimesA) {
+    // With unit upstream gradient: dL/db = 1 * a = a
+    auto s = make_shape({4});
+    auto a = Tensor::zeros(s, 1);
+    auto b = Tensor::zeros(s, 1);
+    for (size_t i = 0; i < 4; ++i) { a.flat(i) = static_cast<float>(i + 1);
+                                      b.flat(i) = static_cast<float>((i + 1) * 10); }
 
-    Tensor A = Tensor::from_data({1,2,3,4},{2,2});
-    Tensor B = Tensor::from_data({5,6,7,8},{2,2});
-    Tensor grad = Tensor::from_data({1,1,1,1},{2,2});
+    auto grads = MulOp::backward(Tensor::ones(s, 1), a, b);
 
-    auto g = MulOp::backward(grad,A,B,true,true);
-
-    EXPECT_FLOAT_EQ(g[1].at(0,0),1.f);
-    EXPECT_FLOAT_EQ(g[1].at(0,1),2.f);
-    EXPECT_FLOAT_EQ(g[1].at(1,0),3.f);
-    EXPECT_FLOAT_EQ(g[1].at(1,1),4.f);
+    for (size_t i = 0; i < 4; ++i)
+        EXPECT_FLOAT_EQ(grads[1].flat(i), a.flat(i));
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 5. Autograd wrapper
-// ═══════════════════════════════════════════════════════════════
+TEST_F(MulOpBackwardTest, NonUnitGradScales) {
+    // grad_a[i] = grad[i] * b[i],  grad_b[i] = grad[i] * a[i]
+    auto s = make_shape({3});
+    auto a    = Tensor::zeros(s, 1);
+    auto b    = Tensor::zeros(s, 1);
+    auto grad = Tensor::zeros(s, 1);
+    a.flat(0) = 1; a.flat(1) = 2; a.flat(2) = 3;
+    b.flat(0) = 4; b.flat(1) = 5; b.flat(2) = 6;
+    grad.flat(0) = 2; grad.flat(1) = 3; grad.flat(2) = 4;
 
-TEST(MulAutograd, OutputRequiresGradIfEitherInputDoes) {
+    auto grads = MulOp::backward(grad, a, b);
 
-    Tensor A = Tensor::from_data({1,2,3,4},{2,2},{},true);
-    Tensor B = Tensor::from_data({5,6,7,8},{2,2},{},false);
-
-    Tensor C = mul(A,B);
-
-    EXPECT_TRUE(C.requires_grad());
+    EXPECT_FLOAT_EQ(grads[0].flat(0), 2 * 4);
+    EXPECT_FLOAT_EQ(grads[0].flat(1), 3 * 5);
+    EXPECT_FLOAT_EQ(grads[0].flat(2), 4 * 6);
+    EXPECT_FLOAT_EQ(grads[1].flat(0), 2 * 1);
+    EXPECT_FLOAT_EQ(grads[1].flat(1), 3 * 2);
+    EXPECT_FLOAT_EQ(grads[1].flat(2), 4 * 3);
 }
 
-TEST(MulAutograd, OutputDoesNotRequireGradIfNeitherDoes) {
-
-    Tensor A = Tensor::from_data({1,2,3,4},{2,2});
-    Tensor B = Tensor::from_data({5,6,7,8},{2,2});
-
-    Tensor C = mul(A,B);
-
-    EXPECT_FALSE(C.requires_grad());
+TEST_F(MulOpBackwardTest, OutputShapeMatchesInput) {
+    auto s    = make_shape({2, 3});
+    auto grads = MulOp::backward(Tensor::ones(s, 2),
+                                 Tensor::ones(s, 2),
+                                 Tensor::ones(s, 2));
+    EXPECT_EQ(grads[0].ndim, 2u);  EXPECT_EQ(grads[0].shape_at(0), 2u);  EXPECT_EQ(grads[0].shape_at(1), 3u);
+    EXPECT_EQ(grads[1].ndim, 2u);  EXPECT_EQ(grads[1].shape_at(0), 2u);  EXPECT_EQ(grads[1].shape_at(1), 3u);
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 6. Full backward through graph
-// ═══════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────
+// mul() — orchestration + autograd wiring
+// ─────────────────────────────────────────────
 
-TEST(MulBackwardValues, GradientAccumulatesOnInputs) {
+class MulFuncTest : public ::testing::Test {};
 
-    Tensor A = Tensor::from_data({1,2,3,4},{2,2},{},true);
-    Tensor B = Tensor::from_data({5,6,7,8},{2,2},{},true);
+TEST_F(MulFuncTest, ProducesCorrectValues) {
+    auto s = make_shape({4});
+    auto a = Tensor::zeros(s, 1);
+    auto b = Tensor::zeros(s, 1);
+    for (size_t i = 0; i < 4; ++i) { a.flat(i) = static_cast<float>(i + 1); b.flat(i) = 2.0f; }
 
-    Tensor C = mul(A,B);
+    auto out = mul(a, b);
 
-    backward(C);
-
-    ASSERT_TRUE(A.has_grad());
-    ASSERT_TRUE(B.has_grad());
-
-    EXPECT_FLOAT_EQ(A.grad().at(0,0),5.f);
-    EXPECT_FLOAT_EQ(B.grad().at(0,0),1.f);
+    EXPECT_FLOAT_EQ(out.flat(0), 2.0f);
+    EXPECT_FLOAT_EQ(out.flat(1), 4.0f);
+    EXPECT_FLOAT_EQ(out.flat(2), 6.0f);
+    EXPECT_FLOAT_EQ(out.flat(3), 8.0f);
 }
 
-TEST(MulBackwardValues, GradientShapeMatchesInputs) {
+TEST_F(MulFuncTest, NoRequiresGradProducesNoMeta) {
+    auto s   = make_shape({4});
+    auto out = mul(Tensor::ones(s, 1), Tensor::ones(s, 1));
+    EXPECT_EQ(out.autograd_meta, nullptr);
+    EXPECT_FALSE(out.requires_grad());
+}
 
-    Tensor A = Tensor::from_data({1,2,3,4},{2,2},{},true);
-    Tensor B = Tensor::from_data({5,6,7,8},{2,2},{},true);
+TEST_F(MulFuncTest, OneRequiresGradProducesMeta) {
+    auto s   = make_shape({4});
+    auto out = mul(Tensor::ones(s, 1, /*requires_grad=*/true), Tensor::ones(s, 1));
+    EXPECT_TRUE(out.requires_grad());
+}
 
-    Tensor C = mul(A,B);
+// ─────────────────────────────────────────────
+// flat() indexing
+// ─────────────────────────────────────────────
 
-    backward(C);
+class FlatIndexTest : public ::testing::Test {};
 
-    EXPECT_EQ(A.grad().shape(0),2);
-    EXPECT_EQ(A.grad().shape(1),2);
+TEST_F(FlatIndexTest, WriteThenRead1D) {
+    auto s = make_shape({8});
+    Tensor t(s, 1);
+    for (size_t i = 0; i < 8; ++i) t.flat(i) = static_cast<float>(i);
+    for (size_t i = 0; i < 8; ++i) EXPECT_FLOAT_EQ(t.flat(i), static_cast<float>(i));
+}
+
+TEST_F(FlatIndexTest, WriteThenRead2D) {
+    auto s = make_shape({3, 4});
+    Tensor t(s, 2);
+    for (size_t i = 0; i < 12; ++i) t.flat(i) = static_cast<float>(i * 2);
+    for (size_t i = 0; i < 12; ++i) EXPECT_FLOAT_EQ(t.flat(i), static_cast<float>(i * 2));
+}
+
+TEST_F(FlatIndexTest, FlatAndOperatorAgreeOnContiguous) {
+    auto s = make_shape({3, 4});
+    auto t = Tensor::zeros(s, 2);
+    for (size_t i = 0; i < 3; ++i)
+        for (size_t j = 0; j < 4; ++j)
+            t(i, j) = static_cast<float>(i * 4 + j);
+
+    for (size_t k = 0; k < 12; ++k)
+        EXPECT_FLOAT_EQ(t.flat(k), static_cast<float>(k));
+}
+
+TEST_F(FlatIndexTest, FlatReturnIsReference) {
+    auto s = make_shape({4});
+    Tensor t(s, 1);
+    t.flat(2) = 0.0f;
+    float& ref = t.flat(2);
+    ref = 55.0f;
+    EXPECT_FLOAT_EQ(t.flat(2), 55.0f);
+}
+
+// ─────────────────────────────────────────────
+// End-to-end autograd via mul()
+// ─────────────────────────────────────────────
+
+class MulOpAutogradTest : public ::testing::Test {};
+
+TEST_F(MulOpAutogradTest, GradAEqualsB_1D) {
+    // z = mul(a, b), seed = ones → dL/da = b
+    auto s = make_shape({4});
+    auto a = Tensor::zeros(s, 1, /*requires_grad=*/true);
+    auto b = Tensor::zeros(s, 1, /*requires_grad=*/true);
+    for (size_t i = 0; i < 4; ++i) { a.flat(i) = static_cast<float>(i + 1); }
+    for (size_t i = 0; i < 4; ++i) { b.flat(i) = static_cast<float>((i + 1) * 10); }
+
+    auto z = mul(a, b);
+    backward(z);
+
+    ASSERT_TRUE(a.has_grad());
+    for (size_t i = 0; i < 4; ++i)
+        EXPECT_FLOAT_EQ(a.grad().flat(i), b.flat(i));
+}
+
+TEST_F(MulOpAutogradTest, GradBEqualsA_1D) {
+    auto s = make_shape({4});
+    auto a = Tensor::zeros(s, 1, /*requires_grad=*/true);
+    auto b = Tensor::zeros(s, 1, /*requires_grad=*/true);
+    for (size_t i = 0; i < 4; ++i) { a.flat(i) = static_cast<float>(i + 1); }
+    for (size_t i = 0; i < 4; ++i) { b.flat(i) = static_cast<float>((i + 1) * 10); }
+
+    auto z = mul(a, b);
+    backward(z);
+
+    ASSERT_TRUE(b.has_grad());
+    for (size_t i = 0; i < 4; ++i)
+        EXPECT_FLOAT_EQ(b.grad().flat(i), a.flat(i));
+}
+
+TEST_F(MulOpAutogradTest, GradAEqualsB_2D) {
+    auto s = make_shape({2, 3});
+    auto a = Tensor::zeros(s, 2, /*requires_grad=*/true);
+    auto b = Tensor::zeros(s, 2, /*requires_grad=*/true);
+    for (size_t i = 0; i < 6; ++i) { a.flat(i) = static_cast<float>(i + 1); }
+    for (size_t i = 0; i < 6; ++i) { b.flat(i) = static_cast<float>((i + 1) * 3); }
+
+    auto z = mul(a, b);
+    backward(z);
+
+    for (size_t i = 0; i < 6; ++i)
+        EXPECT_FLOAT_EQ(a.grad().flat(i), b.flat(i));
+}
+
+TEST_F(MulOpAutogradTest, OnlyOneInputRequiresGrad) {
+    auto s = make_shape({4});
+    auto a = Tensor::zeros(s, 1, /*requires_grad=*/true);
+    auto b = Tensor::zeros(s, 1);
+    for (size_t i = 0; i < 4; ++i) { a.flat(i) = 2.0f; b.flat(i) = 5.0f; }
+
+    auto z = mul(a, b);
+    backward(z);
+
+    ASSERT_TRUE(a.has_grad());
+    for (size_t i = 0; i < 4; ++i)
+        EXPECT_FLOAT_EQ(a.grad().flat(i), 5.0f);  // dL/da = 1 * b = 5
+
+    EXPECT_FALSE(b.has_grad());
+}
+
+TEST_F(MulOpAutogradTest, ForwardValuesNotAffectedByBackward) {
+    auto s = make_shape({3});
+    auto a = Tensor::zeros(s, 1, /*requires_grad=*/true);
+    auto b = Tensor::zeros(s, 1, /*requires_grad=*/true);
+    a.flat(0) = 2.0f; a.flat(1) = 3.0f; a.flat(2) = 4.0f;
+    b.flat(0) = 5.0f; b.flat(1) = 6.0f; b.flat(2) = 7.0f;
+
+    auto z = mul(a, b);
+    EXPECT_FLOAT_EQ(z.flat(0), 10.0f);
+    EXPECT_FLOAT_EQ(z.flat(1), 18.0f);
+    EXPECT_FLOAT_EQ(z.flat(2), 28.0f);
+
+    backward(z);
+
+    EXPECT_FLOAT_EQ(z.flat(0), 10.0f);
+    EXPECT_FLOAT_EQ(z.flat(1), 18.0f);
+    EXPECT_FLOAT_EQ(z.flat(2), 28.0f);
 }

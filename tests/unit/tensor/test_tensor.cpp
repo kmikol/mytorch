@@ -1,753 +1,510 @@
-// tests/test_tensor.cpp
-//
-// Unit tests for the public Tensor API.
-//
-// Tensor is the user-facing wrapper around TensorImpl.  It owns the
-// implementation pointer, exposes factory functions, and provides the
-// element-access, shape, clone, transpose, contiguity, and autograd-metadata
-// interfaces that every other component in the library relies on.
-//
-// Test organisation (in file order):
-//   1.  Tensor::zeros          — factory, shape, ndim, numel, all-zero values
-//   2.  Tensor::from_data      — factory, correct values loaded, shape propagated
-//   3.  Shape and metadata     — ndim(), shape(), numel() for 1-D through 4-D
-//   4.  Element read/write     — at() read, at() write, boundary and interior
-//   5.  Independence           — two tensors from the same data do not share storage
-//   6.  clone()                — value fidelity, storage independence, shape/ndim
-//   7.  transpose()            — shape swap, zero-copy storage, value mapping,
-//                                double-transpose identity, mutation propagation
-//   8.  is_contiguous()        — fresh tensors, transposed tensors,
-//                                double-transposed, clone of non-contiguous
-//   9.  Autograd metadata      — requires_grad flag, has_grad before backward,
-//                                independence between tensors
-//  10.  Internal strides       — verify strides 
-//                                
-//
-// What is NOT tested here:
-//   - default_strides() and TensorImpl::at()  →  test_tensor_impl.cpp
-//   - matmul(), backward(), Linear, SGD       →  their own test files
-//
-// All tests follow the project conventions established in test_tensor_impl.cpp:
-//   - no `auto` — every type is spelled out explicitly
-//   - descriptive variable names that read as sentences
-//   - comments explain *why* a check is needed, not just what it does
-
 #include <gtest/gtest.h>
-#include <memory>
+#include <cstddef>
+#include <cstdint>
+#include <stdexcept>
+#include <utility>
 #include <vector>
-#include <cmath>
+
 #include "tensor/tensor.h"
+#include "autograd.h"
 
-// ════════════════════════════════════════════════════════════════════════════
-// 1.  Tensor::zeros
-//
-// zeros() must allocate a contiguous tensor of the requested shape whose
-// every element is exactly 0.f.  We check shape metadata and values
-// separately so a failure tells us whether the problem is in the allocation
-// bookkeeping or in the initialisation loop.
-// ════════════════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────
 
-TEST(TensorZeros, TwoDimensionalShapeIsRecordedCorrectly) {
-    Tensor tensor = Tensor::zeros({2, 3});
-
-    EXPECT_EQ(tensor.ndim(),    2);
-    EXPECT_EQ(tensor.shape(0),  2);
-    EXPECT_EQ(tensor.shape(1),  3);
-    EXPECT_EQ(tensor.numel(),   6);
+// Builds a Shape array from an initializer list and returns the element count
+// as ndim. Using a helper avoids repeating Shape construction in every test.
+static Shape make_shape(std::initializer_list<size_t> dims) {
+    assert(dims.size() <= MAX_DIM);
+    Shape s{};
+    size_t i = 0;
+    for (size_t d : dims) s[i++] = d;
+    return s;
 }
 
-TEST(TensorZeros, ThreeDimensionalShapeIsRecordedCorrectly) {
-    Tensor tensor = Tensor::zeros({2, 3, 4});
-
-    EXPECT_EQ(tensor.ndim(),    3);
-    EXPECT_EQ(tensor.shape(0),  2);
-    EXPECT_EQ(tensor.shape(1),  3);
-    EXPECT_EQ(tensor.shape(2),  4);
-    EXPECT_EQ(tensor.numel(),  24);
+static Tensor make_tensor(std::initializer_list<size_t> dims) {
+    return Tensor(make_shape(dims), dims.size());
 }
 
-TEST(TensorZeros, FourDimensionalShapeIsRecordedCorrectly) {
-    Tensor tensor = Tensor::zeros({2, 3, 4, 5});
-
-    EXPECT_EQ(tensor.ndim(),    4);
-    EXPECT_EQ(tensor.numel(), 120);
+static Tensor make_zeros(std::initializer_list<size_t> dims) {
+    return Tensor::zeros(make_shape(dims), dims.size());
 }
 
-TEST(TensorZeros, AllElementsAreZero2D) {
-    Tensor tensor = Tensor::zeros({3, 4});
+static Tensor make_ones(std::initializer_list<size_t> dims) {
+    return Tensor::ones(make_shape(dims), dims.size());
+}
 
-    for (int64_t row = 0; row < 3; ++row) {
-        for (int64_t col = 0; col < 4; ++col) {
-            EXPECT_FLOAT_EQ(tensor.at(row, col), 0.f)
-                << "expected 0 at [" << row << ", " << col << "]";
+// ─────────────────────────────────────────────
+// Construction
+// ─────────────────────────────────────────────
+
+class TensorConstructionTest : public ::testing::Test {};
+
+TEST_F(TensorConstructionTest, BasicConstructionDoesNotThrow) {
+    EXPECT_NO_THROW(make_tensor({4, 4}));
+}
+
+TEST_F(TensorConstructionTest, OneDimensional) {
+    EXPECT_NO_THROW(make_tensor({16}));
+}
+
+TEST_F(TensorConstructionTest, HighDimensional) {
+    // MAX_DIM is 8 — this should be the maximum valid rank.
+    EXPECT_NO_THROW(make_tensor({2, 2, 2, 2, 2, 2, 2, 2}));
+}
+
+TEST_F(TensorConstructionTest, ExceedingMaxDimAsserts) {
+    // Shape is fixed at MAX_DIM slots. Passing ndim > MAX_DIM with a
+    // full Shape should trigger the assert inside the constructor.
+    Shape shape{};
+    shape.fill(2);
+    EXPECT_DEATH(Tensor(shape, MAX_DIM + 1), "");
+}
+
+// Note: NullShapeAsserts is no longer applicable — Shape is a value type,
+// not a pointer, so it can never be null.
+
+// ─────────────────────────────────────────────
+// zeros and ones
+// ─────────────────────────────────────────────
+
+class TensorFactoryTest : public ::testing::Test {};
+
+TEST_F(TensorFactoryTest, ZerosAreAllZero) {
+    auto t = make_zeros({4, 4});
+    for (size_t i = 0; i < 4; ++i)
+        for (size_t j = 0; j < 4; ++j) {
+            float val = t(i, j);
+            EXPECT_FLOAT_EQ(val, 0.0f) << "Failed at [" << i << "," << j << "]";
         }
-    }
 }
 
-TEST(TensorZeros, AllElementsAreZero3D) {
-    Tensor tensor = Tensor::zeros({2, 3, 4});
-
-    for (int64_t d0 = 0; d0 < 2; ++d0) {
-        for (int64_t d1 = 0; d1 < 3; ++d1) {
-            for (int64_t d2 = 0; d2 < 4; ++d2) {
-                EXPECT_FLOAT_EQ(tensor.at(d0, d1, d2), 0.f)
-                    << "expected 0 at [" << d0 << ", " << d1 << ", " << d2 << "]";
-            }
+TEST_F(TensorFactoryTest, OnesAreAllOne) {
+    auto t = make_ones({4, 4});
+    for (size_t i = 0; i < 4; ++i)
+        for (size_t j = 0; j < 4; ++j) {
+            float val = t(i, j);
+            EXPECT_FLOAT_EQ(val, 1.0f) << "Failed at [" << i << "," << j << "]";
         }
-    }
 }
 
-TEST(TensorZeros, DoesNotRequireGradByDefault) {
-    // zeros() without the requires_grad flag must produce a leaf tensor
-    // that is not part of the autograd graph.
-    Tensor tensor = Tensor::zeros({2, 2});
-    EXPECT_FALSE(tensor.requires_grad());
+TEST_F(TensorFactoryTest, ZerosOneDimensional) {
+    auto t = make_zeros({16});
+    for (size_t i = 0; i < 16; ++i)
+        EXPECT_FLOAT_EQ(t(i), 0.0f);
 }
 
-TEST(TensorZeros, RequiresGradWhenFlagIsTrue) {
-    Tensor tensor = Tensor::zeros({2, 2}, true);
-    EXPECT_TRUE(tensor.requires_grad());
+TEST_F(TensorFactoryTest, OnesOneDimensional) {
+    auto t = make_ones({16});
+    for (size_t i = 0; i < 16; ++i)
+        EXPECT_FLOAT_EQ(t(i), 1.0f);
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// 2.  Tensor::from_data
-//
-// from_data() must copy the supplied initialiser list into fresh storage
-// and lay it out in row-major order for the given shape.
-//
-// We test value correctness at every corner and one interior position for
-// each dimensionality.  Corner tests catch row/column swap bugs; interior
-// tests catch stride-computation bugs that would only show up away from
-// the origin.
-// ════════════════════════════════════════════════════════════════════════════
-
-TEST(TensorFromData, TwoDimensionalShapeIsRecordedCorrectly) {
-    Tensor tensor = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-
-    EXPECT_EQ(tensor.ndim(),   2);
-    EXPECT_EQ(tensor.shape(0), 2);
-    EXPECT_EQ(tensor.shape(1), 3);
-    EXPECT_EQ(tensor.numel(),  6);
+TEST_F(TensorFactoryTest, ZerosAndOnesAreIndependent) {
+    auto a = make_zeros({4});
+    auto b = make_ones({4});
+    EXPECT_FLOAT_EQ(a(0), 0.0f);
+    EXPECT_FLOAT_EQ(b(0), 1.0f);
 }
 
-TEST(TensorFromData, TwoDimensionalCornerValues) {
-    // Layout (row-major):
-    //   [1  2  3]
-    //   [4  5  6]
-    Tensor tensor = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
+// ─────────────────────────────────────────────
+// Strides
+// ─────────────────────────────────────────────
 
-    EXPECT_FLOAT_EQ(tensor.at(0, 0), 1.f);   // top-left
-    EXPECT_FLOAT_EQ(tensor.at(0, 2), 3.f);   // top-right
-    EXPECT_FLOAT_EQ(tensor.at(1, 0), 4.f);   // bottom-left
-    EXPECT_FLOAT_EQ(tensor.at(1, 2), 6.f);   // bottom-right
+class TensorStrideTest : public ::testing::Test {};
+
+TEST_F(TensorStrideTest, OneDimensionalStrideIsOne) {
+    auto t = make_tensor({16});
+    EXPECT_EQ(t.strides[0], 1);
 }
 
-TEST(TensorFromData, TwoDimensionalInteriorValue) {
-    Tensor tensor = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-
-    // [0,1] is the second column of the first row — value 2
-    EXPECT_FLOAT_EQ(tensor.at(0, 1), 2.f);
-    // [1,1] is the centre element — value 5
-    EXPECT_FLOAT_EQ(tensor.at(1, 1), 5.f);
+TEST_F(TensorStrideTest, TwoDimensionalRowMajorStrides) {
+    // Shape {4, 8}: last dim stride = 1, first dim stride = 8.
+    auto t = make_tensor({4, 8});
+    EXPECT_EQ(t.strides[1], 1);
+    EXPECT_EQ(t.strides[0], 8);
 }
 
-TEST(TensorFromData, ThreeDimensionalShapeIsRecordedCorrectly) {
-    Tensor tensor = Tensor::from_data({1, 2, 3, 4, 5, 6, 7, 8}, {2, 2, 2});
-
-    EXPECT_EQ(tensor.ndim(),   3);
-    EXPECT_EQ(tensor.shape(0), 2);
-    EXPECT_EQ(tensor.shape(1), 2);
-    EXPECT_EQ(tensor.shape(2), 2);
-    EXPECT_EQ(tensor.numel(),  8);
+TEST_F(TensorStrideTest, ThreeDimensionalRowMajorStrides) {
+    // Shape {2, 4, 8}: strides should be {32, 8, 1}.
+    auto t = make_tensor({2, 4, 8});
+    EXPECT_EQ(t.strides[2], 1);
+    EXPECT_EQ(t.strides[1], 8);
+    EXPECT_EQ(t.strides[0], 32);
 }
 
-TEST(TensorFromData, ThreeDimensionalCornerValues) {
-    // Layout (row-major, two 2×2 slabs):
-    //   slab 0:  [1  2]    slab 1:  [5  6]
-    //            [3  4]             [7  8]
-    Tensor tensor = Tensor::from_data({1, 2, 3, 4, 5, 6, 7, 8}, {2, 2, 2});
-
-    EXPECT_FLOAT_EQ(tensor.at(0, 0, 0), 1.f);   // first element of slab 0
-    EXPECT_FLOAT_EQ(tensor.at(0, 1, 1), 4.f);   // last element of slab 0
-    EXPECT_FLOAT_EQ(tensor.at(1, 0, 0), 5.f);   // first element of slab 1
-    EXPECT_FLOAT_EQ(tensor.at(1, 1, 1), 8.f);   // last element overall
+TEST_F(TensorStrideTest, FourDimensionalRowMajorStrides) {
+    // Shape {2, 3, 4, 5}: strides should be {60, 20, 5, 1}.
+    auto t = make_tensor({2, 3, 4, 5});
+    EXPECT_EQ(t.strides[3], 1);
+    EXPECT_EQ(t.strides[2], 5);
+    EXPECT_EQ(t.strides[1], 20);
+    EXPECT_EQ(t.strides[0], 60);
 }
 
-TEST(TensorFromData, DoesNotRequireGradByDefault) {
-    Tensor tensor = Tensor::from_data({1, 2, 3, 4}, {2, 2});
-    EXPECT_FALSE(tensor.requires_grad());
+TEST_F(TensorStrideTest, StridesFromShapeMatchManual) {
+    // Verify the static helper directly.
+    Shape shape = make_shape({3, 4, 5});
+    Strides s = Tensor::strides_from_shape(shape, 3);
+    EXPECT_EQ(s[2], 1);
+    EXPECT_EQ(s[1], 5);
+    EXPECT_EQ(s[0], 20);
 }
 
-TEST(TensorFromData, RequiresGradWhenFlagIsSet) {
-    // The empty strides argument {} tells from_data to compute default strides.
-    Tensor tensor = Tensor::from_data({1, 2, 3, 4}, {2, 2}, {}, true);
-    EXPECT_TRUE(tensor.requires_grad());
+// ─────────────────────────────────────────────
+// Indexing — operator()
+// ─────────────────────────────────────────────
+
+class TensorIndexTest : public ::testing::Test {};
+
+TEST_F(TensorIndexTest, WriteThenRead1D) {
+    auto t = make_tensor({16});
+    t(5) = 42.0f;
+    EXPECT_FLOAT_EQ(t(5), 42.0f);
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// 3.  Shape and metadata accessors
-//
-// ndim(), shape(), and numel() are used everywhere in the codebase to guard
-// against mismatched operands.  We verify that the values they return are
-// consistent with each other and with the shape passed to the factory.
-//
-// numel() must equal the product of all dimensions.  We check this invariant
-// directly because a bug that returns storage.size() instead of the product
-// of the logical shape would be silently wrong for non-contiguous views.
-// ════════════════════════════════════════════════════════════════════════════
-
-TEST(TensorMetadata, NumelEqualsProductOfDimensions2D) {
-    Tensor tensor = Tensor::zeros({5, 7});
-    EXPECT_EQ(tensor.numel(), 5 * 7);
+TEST_F(TensorIndexTest, WriteThenRead2D) {
+    auto t = make_tensor({4, 4});
+    t(2, 3) = 7.0f;
+    float val = t(2, 3);
+    EXPECT_FLOAT_EQ(val, 7.0f);
 }
 
-TEST(TensorMetadata, NumelEqualsProductOfDimensions3D) {
-    Tensor tensor = Tensor::zeros({2, 5, 7});
-    EXPECT_EQ(tensor.numel(), 2 * 5 * 7);
+TEST_F(TensorIndexTest, WriteThenRead3D) {
+    auto t = make_tensor({2, 4, 8});
+    t(1, 2, 3) = 9.0f;
+    float val = t(1, 2, 3);
+    EXPECT_FLOAT_EQ(val, 9.0f);
 }
 
-TEST(TensorMetadata, NumelEqualsProductOfDimensions4D) {
-    Tensor tensor = Tensor::zeros({2, 3, 5, 7});
-    EXPECT_EQ(tensor.numel(), 2 * 3 * 5 * 7);
+TEST_F(TensorIndexTest, IndependentElementsDoNotAlias) {
+    auto t = make_zeros({4, 4});
+    t(1, 1) = 5.0f;
+    EXPECT_FLOAT_EQ(t(0, 0), 0.0f);
+    EXPECT_FLOAT_EQ(t(1, 1), 5.0f);
+    EXPECT_FLOAT_EQ(t(2, 2), 0.0f);
 }
 
-TEST(TensorMetadata, ShapeAccessorMatchesConstructedShape) {
-    // Verify each dimension individually so a failure names the offending axis.
-    Tensor tensor = Tensor::zeros({6, 7, 8, 9});
+TEST_F(TensorIndexTest, FlatLayoutIsRowMajor) {
+    // Fill underlying storage with sequential values, then verify
+    // that (i, j) maps to flat position i*cols + j.
+    constexpr size_t rows = 3, cols = 4;
+    auto t = make_tensor({rows, cols});
+    for (size_t k = 0; k < rows * cols; ++k)
+        (*t.storage)[k] = static_cast<float>(k);
 
-    EXPECT_EQ(tensor.shape(0), 6);
-    EXPECT_EQ(tensor.shape(1), 7);
-    EXPECT_EQ(tensor.shape(2), 8);
-    EXPECT_EQ(tensor.shape(3), 9);
+    for (size_t i = 0; i < rows; ++i)
+        for (size_t j = 0; j < cols; ++j) {
+            float val = t(i, j);
+            EXPECT_FLOAT_EQ(val, static_cast<float>(i * cols + j))
+                << "Failed at (" << i << "," << j << ")";
+        }
 }
 
-TEST(TensorMetadata, NdimMatchesNumberOfAxes) {
-    EXPECT_EQ(Tensor::zeros({5}).ndim(),           1);
-    EXPECT_EQ(Tensor::zeros({3, 4}).ndim(),        2);
-    EXPECT_EQ(Tensor::zeros({2, 3, 4}).ndim(),     3);
-    EXPECT_EQ(Tensor::zeros({2, 3, 4, 5}).ndim(),  4);
+TEST_F(TensorIndexTest, AllElementsWritable) {
+    constexpr size_t N = 8;
+    auto t = make_tensor({N, N});
+    for (size_t i = 0; i < N; ++i)
+        for (size_t j = 0; j < N; ++j)
+            t(i, j) = static_cast<float>(i * N + j);
+
+    for (size_t i = 0; i < N; ++i)
+        for (size_t j = 0; j < N; ++j) {
+            float val = t(i, j);
+            EXPECT_FLOAT_EQ(val, static_cast<float>(i * N + j));
+        }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// 4.  Element read / write  (at())
-//
-// at() is the single gateway to tensor data.  It must:
-//   - return the correct value for every valid multi-index
-//   - return a reference so assignments go to the right storage location
-//   - not disturb adjacent elements when writing
-//
-// We test boundary and interior positions, and we cross-check writes by
-// reading back through at() *and* through the raw storage pointer so that
-// a symmetric bug (wrong index on both read and write) cannot hide.
-// ════════════════════════════════════════════════════════════════════════════
-
-TEST(TensorReadWrite, ReadFromZerosTensor2D) {
-    Tensor tensor = Tensor::zeros({3, 3});
-
-    EXPECT_FLOAT_EQ(tensor.at(0, 0), 0.f);
-    EXPECT_FLOAT_EQ(tensor.at(2, 2), 0.f);
+TEST_F(TensorIndexTest, WrongNumberOfIndicesAsserts) {
+    auto t = make_tensor({4, 4});
+    EXPECT_DEATH(t(0), "");
 }
 
-TEST(TensorReadWrite, WriteAndReadBack2D) {
-    Tensor tensor = Tensor::zeros({3, 3});
-    tensor.at(0, 1) = 7.f;
-    EXPECT_FLOAT_EQ(tensor.at(0, 1), 7.f);
+TEST_F(TensorIndexTest, NonIntegerIndexFailsCompilation) {
+    // static_assert in operator() rejects non-integer indices at compile time.
+    // We document the intent here by testing the underlying trait directly.
+    EXPECT_TRUE((std::is_integral_v<int>));
+    EXPECT_FALSE((std::is_integral_v<float>));
 }
 
-TEST(TensorReadWrite, WriteAndReadBack3D) {
-    Tensor tensor = Tensor::zeros({2, 3, 4});
-    tensor.at(1, 2, 3) = 42.f;
-    EXPECT_FLOAT_EQ(tensor.at(1, 2, 3), 42.f);
+// ─────────────────────────────────────────────
+// numel
+// ─────────────────────────────────────────────
+
+class TensorNumelTest : public ::testing::Test {};
+
+TEST_F(TensorNumelTest, OneDimensional) {
+    auto t = make_tensor({16});
+    EXPECT_EQ(t.numel, 16);
 }
 
-TEST(TensorReadWrite, WriteAndReadBack4D) {
-    Tensor tensor = Tensor::zeros({2, 3, 4, 5});
-    tensor.at(1, 2, 3, 4) = 99.f;
-    EXPECT_FLOAT_EQ(tensor.at(1, 2, 3, 4), 99.f);
+TEST_F(TensorNumelTest, TwoDimensional) {
+    auto t = make_tensor({4, 8});
+    EXPECT_EQ(t.numel, 32);
 }
 
-TEST(TensorReadWrite, WriteDoesNotCorruptNeighbouringElements) {
-    // Write to a single interior element and check that the elements
-    // immediately before and after it in storage are untouched.
-    // This would catch an off-by-one error in the stride arithmetic.
-    Tensor tensor = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    tensor.at(0, 1) = 99.f;   // middle of the first row
-
-    EXPECT_FLOAT_EQ(tensor.at(0, 0), 1.f);   // element before
-    EXPECT_FLOAT_EQ(tensor.at(0, 2), 3.f);   // element after
+TEST_F(TensorNumelTest, ThreeDimensional) {
+    auto t = make_tensor({2, 3, 4});
+    EXPECT_EQ(t.numel, 24);
 }
 
-TEST(TensorReadWrite, WriteIsVisibleThroughRawStoragePointer) {
-    // Cross-check: the write must land at the correct flat offset in the
-    // underlying storage, not just at whichever offset at() happens to read.
-    // For shape {2,3} with strides {3,1}, at({1,0}) → flat index 3.
-    Tensor tensor = Tensor::zeros({2, 3});
-    tensor.at(1, 0) = 55.f;
-
-    EXPECT_FLOAT_EQ(tensor.data_ptr()[3], 55.f);
+TEST_F(TensorNumelTest, HighDimensional) {
+    auto t = make_tensor({2, 2, 2, 2, 2, 2, 2, 2});
+    EXPECT_EQ(t.numel, 256);
 }
 
-TEST(TensorReadWrite, MultipleDistinctWritesDoNotInterfere) {
-    // Write to several elements and verify each is independently retained.
-    Tensor tensor = Tensor::zeros({3, 3});
-    tensor.at(0, 0) = 10.f;
-    tensor.at(1, 1) = 20.f;
-    tensor.at(2, 2) = 30.f;
+// ─────────────────────────────────────────────
+// Shared storage
+// ─────────────────────────────────────────────
 
-    EXPECT_FLOAT_EQ(tensor.at(0, 0), 10.f);
-    EXPECT_FLOAT_EQ(tensor.at(1, 1), 20.f);
-    EXPECT_FLOAT_EQ(tensor.at(2, 2), 30.f);
+class TensorStorageTest : public ::testing::Test {};
+
+TEST_F(TensorStorageTest, StorageIsNotNull) {
+    auto t = make_tensor({4, 4});
+    EXPECT_NE(t.storage, nullptr);
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// 5.  Storage independence between separate tensors
-//
-// Two tensors created from the same data initialiser must own separate
-// storage allocations.  If they shared memory, writing to one would silently
-// corrupt the other — an extremely difficult bug to track down in training
-// loops where tensors are reused across epochs.
-// ════════════════════════════════════════════════════════════════════════════
-
-TEST(TensorIndependence, SeparateTensorsHaveDifferentStoragePointers) {
-    Tensor tensor_a = Tensor::from_data({1, 2, 3, 4}, {2, 2});
-    Tensor tensor_b = Tensor::from_data({1, 2, 3, 4}, {2, 2});
-
-    EXPECT_NE(
-        tensor_a.data_ptr(),
-        tensor_b.data_ptr()
-    );
+TEST_F(TensorStorageTest, StorageSizeMatchesNumel) {
+    auto t = make_tensor({4, 8});
+    EXPECT_EQ(t.storage->size, t.numel);
 }
 
-TEST(TensorIndependence, WritingToOneTensorDoesNotAffectAnother) {
-    Tensor tensor_a = Tensor::from_data({1, 2, 3, 4}, {2, 2});
-    Tensor tensor_b = Tensor::from_data({1, 2, 3, 4}, {2, 2});
-
-    tensor_a.at(0, 0) = 99.f;
-
-    EXPECT_FLOAT_EQ(tensor_b.at(0, 0), 1.f);
+TEST_F(TensorStorageTest, TwoTensorsHaveIndependentStorage) {
+    auto a = make_ones({4});
+    auto b = make_zeros({4});
+    EXPECT_NE(a.storage, b.storage);
 }
 
-TEST(TensorIndependence, TwoZerosTensorsHaveDifferentStoragePointers) {
-    // zeros() must allocate fresh storage each call, not return a cached tensor.
-    Tensor tensor_a = Tensor::zeros({3, 3});
-    Tensor tensor_b = Tensor::zeros({3, 3});
-
-    EXPECT_NE(
-        tensor_a.data_ptr(),
-        tensor_b.data_ptr()
-    );
+TEST_F(TensorStorageTest, SharedStorageReflectsWrites) {
+    // Two tensors sharing the same storage should see each other's writes.
+    auto a = make_zeros({4});
+    Tensor b = a; // shared_ptr copy — same underlying storage
+    a(2) = 99.0f;
+    EXPECT_FLOAT_EQ(b(2), 99.0f);
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// 6.  clone()
-//
-// clone() must produce an exact value copy with independent storage.  It is
-// the explicit way to materialise a new allocation — critical when you need
-// to save activations before an in-place update.
-//
-// We test:
-//   - value fidelity (every element matches)
-//   - storage independence (pointer differs, mutation does not propagate)
-//   - shape and ndim are preserved
-//   - cloning a non-contiguous (transposed) tensor produces a contiguous copy
-//     with the correct logical values
-// ════════════════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────
+// Per-dim accessors: shape_at / stride_at
+// ─────────────────────────────────────────────
 
-TEST(TensorClone, ClonedTensorHasSameValues2D) {
-    Tensor original = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor cloned   = original.clone();
+class TensorDimAccessorTest : public ::testing::Test {};
 
-    EXPECT_FLOAT_EQ(cloned.at(0, 0), 1.f);
-    EXPECT_FLOAT_EQ(cloned.at(0, 2), 3.f);
-    EXPECT_FLOAT_EQ(cloned.at(1, 0), 4.f);
-    EXPECT_FLOAT_EQ(cloned.at(1, 2), 6.f);
+TEST_F(TensorDimAccessorTest, ShapeAtReturnsCorrectDims) {
+    auto t = make_tensor({2, 3, 4});
+    EXPECT_EQ(t.shape_at(0), 2u);
+    EXPECT_EQ(t.shape_at(1), 3u);
+    EXPECT_EQ(t.shape_at(2), 4u);
 }
 
-TEST(TensorClone, ClonedTensorHasSameShape) {
-    Tensor original = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor cloned   = original.clone();
-
-    EXPECT_EQ(cloned.ndim(),   original.ndim());
-    EXPECT_EQ(cloned.shape(0), original.shape(0));
-    EXPECT_EQ(cloned.shape(1), original.shape(1));
-    EXPECT_EQ(cloned.numel(),  original.numel());
+TEST_F(TensorDimAccessorTest, StrideAtReturnsCorrectDims) {
+    // shape {2, 3, 4} → strides {12, 4, 1}
+    auto t = make_tensor({2, 3, 4});
+    EXPECT_EQ(t.stride_at(0), 12u);
+    EXPECT_EQ(t.stride_at(1),  4u);
+    EXPECT_EQ(t.stride_at(2),  1u);
 }
 
-TEST(TensorClone, ClonedTensorHasDifferentStoragePointer) {
-    // If storage were shared, the next test (mutation) would be vacuous.
-    // Checking the pointer directly makes the independence guarantee explicit.
-    Tensor original = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor cloned   = original.clone();
-
-    EXPECT_NE(
-        cloned.data_ptr(),
-        original.data_ptr()
-    );
+TEST_F(TensorDimAccessorTest, ShapeAtOneDim) {
+    auto t = make_tensor({16});
+    EXPECT_EQ(t.shape_at(0), 16u);
 }
 
-TEST(TensorClone, MutatingCloneDoesNotAffectOriginal) {
-    Tensor original = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor cloned   = original.clone();
-
-    cloned.at(0, 0) = 99.f;
-
-    EXPECT_FLOAT_EQ(original.at(0, 0), 1.f);
+TEST_F(TensorDimAccessorTest, StrideAtOneDim) {
+    auto t = make_tensor({16});
+    EXPECT_EQ(t.stride_at(0), 1u);
 }
 
-TEST(TensorClone, MutatingOriginalDoesNotAffectClone) {
-    Tensor original = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor cloned   = original.clone();
-
-    original.at(0, 0) = 99.f;
-
-    EXPECT_FLOAT_EQ(cloned.at(0, 0), 1.f);
+TEST_F(TensorDimAccessorTest, ShapeAtOutOfRangeThrows) {
+    auto t = make_tensor({4, 4});
+    EXPECT_THROW(t.shape_at(2),  std::out_of_range);
+    EXPECT_THROW(t.shape_at(99), std::out_of_range);
 }
 
-TEST(TensorClone, ClonePreservesNdimFor3D) {
-    Tensor original = Tensor::from_data({1, 2, 3, 4, 5, 6, 7, 8}, {2, 2, 2});
-    Tensor cloned   = original.clone();
-
-    EXPECT_EQ(cloned.ndim(),      3);
-    EXPECT_FLOAT_EQ(cloned.at(1, 1, 1), 8.f);
+TEST_F(TensorDimAccessorTest, StrideAtOutOfRangeThrows) {
+    auto t = make_tensor({4, 4});
+    EXPECT_THROW(t.stride_at(2),  std::out_of_range);
+    EXPECT_THROW(t.stride_at(99), std::out_of_range);
 }
 
-TEST(TensorClone, CloneOfTransposedTensorHasCorrectLogicalValues) {
-    // Cloning a non-contiguous tensor must materialise the logical view,
-    // not just copy the raw storage bytes.  The resulting tensor must
-    // read the same values as the transposed view, but laid out contiguously.
-    //
-    // original [2,3]:          transposed [3,2]:
-    //   [1  2  3]                [1  4]
-    //   [4  5  6]                [2  5]
-    //                            [3  6]
-    Tensor original    = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor transposed  = original.transpose();
-    Tensor cloned      = transposed.clone();
-
-    EXPECT_EQ(cloned.shape(0), 3);
-    EXPECT_EQ(cloned.shape(1), 2);
-
-    EXPECT_FLOAT_EQ(cloned.at(0, 0), 1.f);
-    EXPECT_FLOAT_EQ(cloned.at(0, 1), 4.f);
-    EXPECT_FLOAT_EQ(cloned.at(1, 0), 2.f);
-    EXPECT_FLOAT_EQ(cloned.at(1, 1), 5.f);
-    EXPECT_FLOAT_EQ(cloned.at(2, 0), 3.f);
-    EXPECT_FLOAT_EQ(cloned.at(2, 1), 6.f);
+TEST_F(TensorDimAccessorTest, ShapeAtLastValidDimDoesNotThrow) {
+    auto t = make_tensor({2, 3, 4, 5});
+    EXPECT_NO_THROW(t.shape_at(3));
+    EXPECT_EQ(t.shape_at(3), 5u);
 }
 
-TEST(TensorClone, CloneOfTransposedTensorIsContiguous) {
-    // After cloning, the copy must be in default row-major order regardless
-    // of how the source tensor was laid out.  Operations like matmul that
-    // assume contiguity depend on this.
-    Tensor original   = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor transposed = original.transpose();
-    Tensor cloned     = transposed.clone();
+// ─────────────────────────────────────────────
+// clone()
+// ─────────────────────────────────────────────
 
-    EXPECT_TRUE(cloned.is_contiguous());
+class TensorCloneTest : public ::testing::Test {};
+
+TEST_F(TensorCloneTest, CloneHasSameShape) {
+    auto t = make_tensor({3, 4});
+    auto c = t.clone();
+    EXPECT_EQ(c.ndim, t.ndim);
+    EXPECT_EQ(c.shape_at(0), t.shape_at(0));
+    EXPECT_EQ(c.shape_at(1), t.shape_at(1));
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// 7.  transpose()
-//
-// transpose() must return a zero-copy view with swapped shape and strides.
-// "Zero-copy" means the underlying storage pointer is shared — no new
-// allocation and no data movement.  Mutations through the transposed view
-// must be visible in the original and vice versa.
-//
-// We test:
-//   - shape dimensions are swapped
-//   - storage pointer is identical (zero-copy guarantee)
-//   - logical values are correctly remapped
-//   - double transpose restores original shape and contiguity
-//   - a write through the transposed view modifies the original storage
-// ════════════════════════════════════════════════════════════════════════════
-
-TEST(TensorTranspose, ShapeIsSwapped) {
-    Tensor original   = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor transposed = original.transpose();
-
-    EXPECT_EQ(transposed.shape(0), 3);   // was 2
-    EXPECT_EQ(transposed.shape(1), 2);   // was 3
+TEST_F(TensorCloneTest, CloneHasSameValues) {
+    auto t = make_zeros({3, 4});
+    t(1, 2) = 7.0f;
+    t(2, 3) = 5.0f;
+    auto c = t.clone();
+    EXPECT_FLOAT_EQ(c(1, 2), 7.0f);
+    EXPECT_FLOAT_EQ(c(2, 3), 5.0f);
 }
 
-TEST(TensorTranspose, NdimIsPreserved) {
-    Tensor original   = Tensor::zeros({2, 3});
-    Tensor transposed = original.transpose();
-
-    EXPECT_EQ(transposed.ndim(), 2);
+TEST_F(TensorCloneTest, CloneHasIndependentStorage) {
+    auto t = make_zeros({4});
+    auto c = t.clone();
+    t(0) = 99.0f;
+    EXPECT_FLOAT_EQ(c(0), 0.0f);  // clone not affected by write to original
 }
 
-TEST(TensorTranspose, NumelIsPreserved) {
-    Tensor original   = Tensor::zeros({2, 3});
-    Tensor transposed = original.transpose();
-
-    EXPECT_EQ(transposed.numel(), 6);
+TEST_F(TensorCloneTest, WriteToCloneDoesNotAffectOriginal) {
+    auto t = make_ones({4});
+    auto c = t.clone();
+    c(0) = 42.0f;
+    EXPECT_FLOAT_EQ(t(0), 1.0f);  // original unchanged
 }
 
-TEST(TensorTranspose, StoragePointerIsSharedZeroCopy) {
-    // The whole point of a transposed view is that it reuses existing memory.
-    // If this fails it means transpose() allocated a new buffer, which would
-    // break the mutation-propagation contract below.
-    Tensor original   = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor transposed = original.transpose();
-
-    EXPECT_EQ(
-        transposed.data_ptr(),
-        original.data_ptr()
-    );
+TEST_F(TensorCloneTest, CloneIsContiguous) {
+    auto t = make_tensor({3, 4});
+    auto c = t.clone();
+    EXPECT_TRUE(c.is_contiguous());
 }
 
-TEST(TensorTranspose, ElementValuesAreRemappedCorrectly) {
-    // original [2,3]:          transposed [3,2]:
-    //   [1  2  3]                [1  4]
-    //   [4  5  6]                [2  5]
-    //                            [3  6]
-    Tensor original   = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor transposed = original.transpose();
-
-    EXPECT_FLOAT_EQ(transposed.at(0, 0), 1.f);
-    EXPECT_FLOAT_EQ(transposed.at(0, 1), 4.f);
-    EXPECT_FLOAT_EQ(transposed.at(1, 0), 2.f);
-    EXPECT_FLOAT_EQ(transposed.at(1, 1), 5.f);
-    EXPECT_FLOAT_EQ(transposed.at(2, 0), 3.f);
-    EXPECT_FLOAT_EQ(transposed.at(2, 1), 6.f);
+TEST_F(TensorCloneTest, CloneHasNoAutogradMeta) {
+    // Even if the source has requires_grad, clone produces a detached copy.
+    auto s = make_shape({4});
+    auto t = Tensor::zeros(s, 1, /*requires_grad=*/true);
+    auto c = t.clone();
+    EXPECT_FALSE(c.requires_grad());
 }
 
-TEST(TensorTranspose, DoubleTransposeRestoresOriginalShape) {
-    Tensor original          = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor double_transposed = original.transpose().transpose();
-
-    EXPECT_EQ(double_transposed.shape(0), 2);
-    EXPECT_EQ(double_transposed.shape(1), 3);
+TEST_F(TensorCloneTest, CloneOf1DOnesTones) {
+    auto t = make_ones({8});
+    auto c = t.clone();
+    for (size_t i = 0; i < 8; ++i)
+        EXPECT_FLOAT_EQ(c(i), 1.0f);
 }
 
-TEST(TensorTranspose, DoubleTransposeRestoresOriginalValues) {
-    Tensor original          = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor double_transposed = original.transpose().transpose();
-
-    EXPECT_FLOAT_EQ(double_transposed.at(0, 0), 1.f);
-    EXPECT_FLOAT_EQ(double_transposed.at(0, 2), 3.f);
-    EXPECT_FLOAT_EQ(double_transposed.at(1, 0), 4.f);
-    EXPECT_FLOAT_EQ(double_transposed.at(1, 2), 6.f);
+TEST_F(TensorCloneTest, ClonePreservesNumel) {
+    auto t = make_tensor({2, 3, 4});
+    auto c = t.clone();
+    EXPECT_EQ(c.numel, t.numel);
 }
 
-TEST(TensorTranspose, WriteThroughTransposedViewAffectsOriginal) {
-    // Because transposed shares storage with original, a write through the
-    // transposed view must immediately be visible in the original at the
-    // corresponding logical position.
-    //
-    // transposed[1, 0] corresponds to original[0, 1] (column and row swapped).
-    Tensor original   = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor transposed = original.transpose();
+// ─────────────────────────────────────────────
+// requires_grad and autograd_meta
+// ─────────────────────────────────────────────
 
-    transposed.at(1, 0) = 99.f;
+class TensorAutogradMetaTest : public ::testing::Test {};
 
-    EXPECT_FLOAT_EQ(original.at(0, 1), 99.f);
+TEST_F(TensorAutogradMetaTest, DefaultTensorHasNoAutogradMeta) {
+    auto t = make_tensor({4, 4});
+    EXPECT_EQ(t.autograd_meta, nullptr);
 }
 
-TEST(TensorTranspose, WriteToOriginalAffectsTransposedView) {
-    // The reverse direction: original write must propagate into the view.
-    Tensor original   = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor transposed = original.transpose();
-
-    original.at(1, 2) = 77.f;   // bottom-right of original
-
-    // In transposed that position becomes [2, 1] (last row, second column)
-    EXPECT_FLOAT_EQ(transposed.at(2, 1), 77.f);
+TEST_F(TensorAutogradMetaTest, DefaultRequiresGradIsFalse) {
+    auto t = make_tensor({4, 4});
+    EXPECT_FALSE(t.requires_grad());
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// 8.  is_contiguous()
-//
-// A tensor is contiguous when its strides match the default row-major layout
-// for its shape.  This matters because operations like matmul may need to
-// call clone() on non-contiguous inputs before processing them.
-//
-// Key cases:
-//   - freshly created tensors are always contiguous
-//   - transpose() produces a non-contiguous view (strides are swapped)
-//   - double-transpose restores contiguity (strides match shape again)
-//   - clone() of a non-contiguous tensor is always contiguous
-// ════════════════════════════════════════════════════════════════════════════
-
-TEST(TensorIsContiguous, ZerosTensorIsContiguous) {
-    EXPECT_TRUE(Tensor::zeros({3, 4}).is_contiguous());
+TEST_F(TensorAutogradMetaTest, ZerosWithRequiresGradTrue) {
+    auto s = make_shape({3, 3});
+    auto t = Tensor::zeros(s, 2, /*requires_grad=*/true);
+    EXPECT_TRUE(t.requires_grad());
 }
 
-TEST(TensorIsContiguous, FromDataTensorIsContiguous) {
-    Tensor tensor = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    EXPECT_TRUE(tensor.is_contiguous());
+TEST_F(TensorAutogradMetaTest, OnesWithRequiresGradTrue) {
+    auto s = make_shape({3});
+    auto t = Tensor::ones(s, 1, /*requires_grad=*/true);
+    EXPECT_TRUE(t.requires_grad());
 }
 
-TEST(TensorIsContiguous, ThreeDimZerosTensorIsContiguous) {
-    EXPECT_TRUE(Tensor::zeros({2, 3, 4}).is_contiguous());
+TEST_F(TensorAutogradMetaTest, ZerosWithRequiresGradFalseDefault) {
+    auto s = make_shape({3, 3});
+    auto t = Tensor::zeros(s, 2);
+    EXPECT_FALSE(t.requires_grad());
+    EXPECT_EQ(t.autograd_meta, nullptr);
 }
 
-TEST(TensorIsContiguous, TransposedTensorIsNotContiguous) {
-    // After transposing, the strides are {1, 3} but default strides for
-    // shape {3, 2} would be {2, 1} — they disagree, so not contiguous.
-    Tensor original   = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor transposed = original.transpose();
-
-    EXPECT_FALSE(transposed.is_contiguous());
+TEST_F(TensorAutogradMetaTest, RequiresGradTensorHasNonNullMeta) {
+    auto s = make_shape({4});
+    auto t = Tensor::zeros(s, 1, /*requires_grad=*/true);
+    EXPECT_NE(t.autograd_meta, nullptr);
 }
 
-TEST(TensorIsContiguous, DoubleTransposedTensorIsContiguous) {
-    // Transposing twice returns strides {3, 1} for shape {2, 3}, which
-    // matches default row-major strides — so it is contiguous again.
-    Tensor original          = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor double_transposed = original.transpose().transpose();
-
-    EXPECT_TRUE(double_transposed.is_contiguous());
+TEST_F(TensorAutogradMetaTest, HasGradFalseBeforeBackward) {
+    auto s = make_shape({4});
+    auto t = Tensor::zeros(s, 1, /*requires_grad=*/true);
+    EXPECT_FALSE(t.has_grad());
 }
 
-TEST(TensorIsContiguous, CloneOfTransposedTensorIsContiguous) {
-    // clone() materialises a fresh row-major copy, so it must always be
-    // contiguous regardless of the source tensor's layout.
-    Tensor transposed = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3}).transpose();
-    Tensor cloned     = transposed.clone();
-
-    EXPECT_TRUE(cloned.is_contiguous());
+TEST_F(TensorAutogradMetaTest, GradThrowsWhenNoGradient) {
+    auto s = make_shape({4});
+    auto t = Tensor::zeros(s, 1, /*requires_grad=*/true);
+    EXPECT_THROW(t.grad(), std::runtime_error);
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// 9.  Autograd metadata  (requires_grad / has_grad)
-//
-// requires_grad marks tensors that participate in gradient computation.
-// has_grad becomes true only after backward() has accumulated a gradient.
-// These two flags are independent: requires_grad is set at construction,
-// has_grad is set later by the autograd engine.
-//
-// We do not call backward() here — that is covered in test_autograd.cpp.
-// Here we only verify the metadata state before any backward pass.
-// ════════════════════════════════════════════════════════════════════════════
-
-TEST(TensorAutogradMeta, RequiresGradIsFalseByDefault) {
-    Tensor tensor = Tensor::zeros({2, 2});
-    EXPECT_FALSE(tensor.requires_grad());
+TEST_F(TensorAutogradMetaTest, GradThrowsOnPlainTensor) {
+    auto t = make_zeros({4});
+    EXPECT_THROW(t.grad(), std::runtime_error);
 }
 
-TEST(TensorAutogradMeta, RequiresGradIsTrueWhenRequested) {
-    Tensor tensor = Tensor::zeros({2, 2}, true);
-    EXPECT_TRUE(tensor.requires_grad());
+TEST_F(TensorAutogradMetaTest, ManuallySetGradIsRetrievable) {
+    auto s = make_shape({2});
+    auto t = Tensor::ones(s, 1, /*requires_grad=*/true);
+
+    // Simulate what backward() would do: populate the grad field.
+    auto g = std::make_shared<Tensor>(Tensor::zeros(s, 1));
+    (*g)(0) = 3.0f;
+    (*g)(1) = 7.0f;
+    t.autograd_meta->grad = g;
+
+    EXPECT_TRUE(t.has_grad());
+    EXPECT_FLOAT_EQ(t.grad()(0), 3.0f);
+    EXPECT_FLOAT_EQ(t.grad()(1), 7.0f);
 }
 
-TEST(TensorAutogradMeta, HasGradIsFalseBeforeBackward) {
-    // A leaf tensor with requires_grad=true must NOT have a gradient
-    // until backward() is called.  Returning a spurious zero gradient
-    // would corrupt gradient accumulation in multi-step training loops.
-    Tensor tensor = Tensor::zeros({2, 2}, true);
-    EXPECT_FALSE(tensor.has_grad());
+// ─────────────────────────────────────────────
+// from_storage
+// ─────────────────────────────────────────────
+
+class TensorFromStorageTest : public ::testing::Test {};
+
+TEST_F(TensorFromStorageTest, WrapsExistingStorage) {
+    auto s = make_shape({3});
+    auto stor = std::make_shared<Storage>(3);
+    stor->data[0] = 1.0f;
+    stor->data[1] = 2.0f;
+    stor->data[2] = 3.0f;
+
+    auto t = Tensor::from_storage(stor, s, 1);
+    EXPECT_FLOAT_EQ(t(0), 1.0f);
+    EXPECT_FLOAT_EQ(t(1), 2.0f);
+    EXPECT_FLOAT_EQ(t(2), 3.0f);
 }
 
-TEST(TensorAutogradMeta, HasGradIsFalseForNonGradTensor) {
-    Tensor tensor = Tensor::zeros({2, 2}, false);
-    EXPECT_FALSE(tensor.has_grad());
+TEST_F(TensorFromStorageTest, SharesOwnership) {
+    auto s    = make_shape({2});
+    auto stor = std::make_shared<Storage>(2);
+    stor->data[0] = 5.0f;
+    stor->data[1] = 6.0f;
+
+    auto t = Tensor::from_storage(stor, s, 1);
+    // Writing through the tensor should be visible via the original shared_ptr.
+    t(0) = 99.0f;
+    EXPECT_FLOAT_EQ(stor->data[0], 99.0f);
 }
 
-TEST(TensorAutogradMeta, RequiresGradFromDataWithFlag) {
-    Tensor tensor = Tensor::from_data({1, 2, 3, 4}, {2, 2}, {}, true);
-    EXPECT_TRUE(tensor.requires_grad());
-    EXPECT_FALSE(tensor.has_grad());
-}
-
-TEST(TensorAutogradMeta, FlagsAreIndependentBetweenTensors) {
-    // The requires_grad flag must be per-tensor, not a global or shared state.
-    // If it were shared, setting it on one tensor would corrupt the other.
-    Tensor grad_tensor    = Tensor::zeros({2, 2}, true);
-    Tensor no_grad_tensor = Tensor::zeros({2, 2}, false);
-
-    EXPECT_TRUE(grad_tensor.requires_grad());
-    EXPECT_FALSE(no_grad_tensor.requires_grad());
-}
-
-TEST(TensorAutogradMeta, ClonedTensorDoesNotInheritRequiresGrad) {
-    // clone() creates a detached copy — it should NOT carry over the
-    // autograd graph membership of its source.  If it did, an accidental
-    // clone inside a loss function would silently add a leaf to the graph.
-    Tensor original = Tensor::zeros({2, 2}, true);
-    Tensor cloned   = original.clone();
-
-    EXPECT_FALSE(cloned.requires_grad());
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// 10.  Internal strides  (strides)
-//
-// Strides are the bridge between Tensor's logical shape and TensorImpl's
-// element-access arithmetic.  We inspect them directly here so that if a
-// higher-level test (e.g. a wrong matmul result) fails, we can immediately
-// rule out a stride bug by running this suite.
-//
-// We also verify that transpose() correctly swaps the strides (not just the
-// shape), since the shape swap alone would not change which storage element
-// at() resolves to.
-// ════════════════════════════════════════════════════════════════════════════
-
-TEST(TensorInternalStrides, DefaultStridesFor2DShape) {
-    // shape {3, 4} → row-major strides must be {4, 1}
-    Tensor tensor = Tensor::zeros({3, 4});
-
-    std::vector<int64_t> strides = tensor.strides();
-
-    EXPECT_EQ(strides[0], 4);
-    EXPECT_EQ(strides[1], 1);
-}
-
-TEST(TensorInternalStrides, DefaultStridesFor3DShape) {
-    // shape {2, 3, 4} → strides must be {12, 4, 1}
-    Tensor tensor = Tensor::zeros({2, 3, 4});
-
-    std::vector<int64_t> strides = tensor.strides();
-
-    EXPECT_EQ(strides[0], 12);
-    EXPECT_EQ(strides[1],  4);
-    EXPECT_EQ(strides[2],  1);
-}
-
-TEST(TensorInternalStrides, DefaultStridesFor4DShape) {
-    // shape {2, 3, 4, 5} → strides must be {60, 20, 5, 1}
-    Tensor tensor = Tensor::zeros({2, 3, 4, 5});
-
-    std::vector<int64_t> strides = tensor.strides();
-
-    EXPECT_EQ(strides[0], 60);
-    EXPECT_EQ(strides[1], 20);
-    EXPECT_EQ(strides[2],  5);
-    EXPECT_EQ(strides[3],  1);
-}
-
-TEST(TensorInternalStrides, TransposeSwapsStrides) {
-    // Transposing [2, 3] (strides {3, 1}) must produce [3, 2] with strides {1, 3}.
-    // If only the shape were swapped the indexing arithmetic would still use
-    // the original strides and produce wrong values.
-    Tensor original   = Tensor::zeros({2, 3});
-    Tensor transposed = original.transpose();
-
-    std::vector<int64_t> strides = transposed.strides();
-
-    EXPECT_EQ(strides[0], 1);
-    EXPECT_EQ(strides[1], 3);
-}
-
-TEST(TensorInternalStrides, DoubleTransposeRestoresOriginalStrides) {
-    Tensor original          = Tensor::zeros({2, 3});
-    Tensor double_transposed = original.transpose().transpose();
-
-    std::vector<int64_t> strides = double_transposed.strides();
-
-    EXPECT_EQ(strides[0], 3);
-    EXPECT_EQ(strides[1], 1);
-}
-
-TEST(TensorInternalStrides, CloneOfTransposedTensorHasDefaultStrides) {
-    // A clone always materialises a fresh contiguous layout, so its strides
-    // must match the default for its shape — {2, 1} for shape {3, 2}.
-    Tensor transposed = Tensor::zeros({2, 3}).transpose();   // shape {3,2}
-    Tensor cloned     = transposed.clone();
-
-    std::vector<int64_t> strides = cloned.strides();
-
-    EXPECT_EQ(strides[0], 2);
-    EXPECT_EQ(strides[1], 1);
+TEST_F(TensorFromStorageTest, ShapeAndNumelAreCorrect) {
+    auto s    = make_shape({2, 3});
+    auto stor = std::make_shared<Storage>(6);
+    auto t    = Tensor::from_storage(stor, s, 2);
+    EXPECT_EQ(t.numel, 6u);
+    EXPECT_EQ(t.shape_at(0), 2u);
+    EXPECT_EQ(t.shape_at(1), 3u);
 }

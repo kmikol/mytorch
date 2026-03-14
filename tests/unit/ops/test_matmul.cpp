@@ -1,514 +1,423 @@
-// tests/test_matmul.cpp
+// tests/unit/ops/test_matmul.cpp
 //
 // Unit tests for matmul() and MatMulOp.
 //
-// The implementation has two distinct forward paths that must both be tested:
-//
-//   Fast path  — both inputs are contiguous: uses raw pointer arithmetic.
-//   Slow path  — at least one input is non-contiguous: uses at() with strides.
-//
-// Both paths must produce identical results.  A bug in one path but not the
-// other would only surface on whichever input layout the training code uses.
-//
 // Test organisation:
-//   1.  MatMulOpForward        — forward() in isolation, shape and values
-//   2.  MatMulForwardFastPath  — contiguous inputs use the pointer loop
-//   3.  MatMulForwardSlowPath  — non-contiguous inputs use at() loop
-//   4.  MatMulForwardBothPaths — fast and slow produce identical results
-//   5.  MatMulOpBackward       — backward() gradients in isolation
-//   6.  MatMulAutograd         — requires_grad propagation and graph wiring
-//   7.  MatMulBackwardValues   — numerical gradient values after backward()
+//   1. MatMulOpForwardTest    — forward() in isolation: shapes and values
+//   2. MatMulTransposedInput  — forward() with non-contiguous (T()) inputs
+//   3. MatMulOpBackwardTest   — backward() gradients in isolation
+//   4. MatMulFuncTest         — matmul() autograd wiring (requires_grad)
+//   5. MatMulAutogradTest     — full backward() pass through matmul()
 
 #include <gtest/gtest.h>
-#include <vector>
-#include <cmath>
-#include "tensorlib.h"
-#include "ops/ops.h"
+#include <cstddef>
+
+#include "ops/matmul.h"
+
+// ─────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────
+
+static Shape make_shape(std::initializer_list<size_t> dims) {
+    Shape s{};
+    size_t i = 0;
+    for (size_t d : dims) s[i++] = d;
+    return s;
+}
+
+// Build a tensor from a flat data list and dimension sizes.
+static Tensor make_tensor(std::initializer_list<float>  data,
+                          std::initializer_list<size_t> dims,
+                          bool requires_grad = false) {
+    Shape  s{};
+    size_t ndim = 0;
+    for (size_t d : dims) s[ndim++] = d;
+
+    Tensor t(s, ndim, requires_grad);
+    size_t i = 0;
+    for (float v : data) t.flat(i++) = v;
+    return t;
+}
 
 // ════════════════════════════════════════════════════════════════════════════
-// 1.  MatMulOpForward — shape and value correctness
-//
-// We test forward() directly before testing the public matmul() wrapper so
-// that shape or value failures can be attributed to the core computation
-// rather than to the autograd wiring around it.
+// 1. MatMulOpForwardTest — shape and value correctness
 // ════════════════════════════════════════════════════════════════════════════
 
-TEST(MatMulOpForward, OutputShapeIsCorrectForRectangularMatrices) {
+class MatMulOpForwardTest : public ::testing::Test {};
+
+TEST_F(MatMulOpForwardTest, OutputShapeRectangular) {
     // [2,3] @ [3,4] → [2,4]
-    Tensor matrix_a = Tensor::zeros({2, 3});
-    Tensor matrix_b = Tensor::zeros({3, 4});
-    Tensor result   = MatMulOp::forward(matrix_a, matrix_b);
-
-    EXPECT_EQ(result.shape(0), 2);
-    EXPECT_EQ(result.shape(1), 4);
+    auto out = MatMulOp::forward(Tensor::zeros(make_shape({2,3}), 2),
+                                 Tensor::zeros(make_shape({3,4}), 2));
+    EXPECT_EQ(out.shape_at(0), 2u);
+    EXPECT_EQ(out.shape_at(1), 4u);
 }
 
-TEST(MatMulOpForward, OutputShapeIsCorrectForSquareMatrices) {
-    Tensor matrix_a = Tensor::zeros({3, 3});
-    Tensor matrix_b = Tensor::zeros({3, 3});
-    Tensor result   = MatMulOp::forward(matrix_a, matrix_b);
-
-    EXPECT_EQ(result.shape(0), 3);
-    EXPECT_EQ(result.shape(1), 3);
+TEST_F(MatMulOpForwardTest, OutputShapeSquare) {
+    auto out = MatMulOp::forward(Tensor::zeros(make_shape({3,3}), 2),
+                                 Tensor::zeros(make_shape({3,3}), 2));
+    EXPECT_EQ(out.shape_at(0), 3u);
+    EXPECT_EQ(out.shape_at(1), 3u);
 }
 
-TEST(MatMulOpForward, OutputShapeIsCorrectForColumnVector) {
-    // [2,3] @ [3,1] → [2,1]  — the most common shape in linear layers
-    Tensor matrix = Tensor::zeros({2, 3});
-    Tensor vector = Tensor::zeros({3, 1});
-    Tensor result = MatMulOp::forward(matrix, vector);
-
-    EXPECT_EQ(result.shape(0), 2);
-    EXPECT_EQ(result.shape(1), 1);
+TEST_F(MatMulOpForwardTest, OutputShapeColumnVector) {
+    // [2,3] @ [3,1] → [2,1]
+    auto out = MatMulOp::forward(Tensor::zeros(make_shape({2,3}), 2),
+                                 Tensor::zeros(make_shape({3,1}), 2));
+    EXPECT_EQ(out.shape_at(0), 2u);
+    EXPECT_EQ(out.shape_at(1), 1u);
 }
 
-TEST(MatMulOpForward, OutputNdimIsAlwaysTwo) {
-    Tensor matrix_a = Tensor::zeros({2, 3});
-    Tensor matrix_b = Tensor::zeros({3, 4});
-    Tensor result   = MatMulOp::forward(matrix_a, matrix_b);
-
-    EXPECT_EQ(result.ndim(), 2);
+TEST_F(MatMulOpForwardTest, OutputNdimIsTwo) {
+    auto out = MatMulOp::forward(Tensor::zeros(make_shape({2,3}), 2),
+                                 Tensor::zeros(make_shape({3,4}), 2));
+    EXPECT_EQ(out.ndim, 2u);
 }
 
-TEST(MatMulOpForward, ComputesCorrect2x3by3x2Product) {
-    // Hand-computed reference:
-    // A = [1 2 3]    B = [7  8 ]
-    //     [4 5 6]        [9  10]
-    //                    [11 12]
-    //
+TEST_F(MatMulOpForwardTest, OutputIsContiguous) {
+    auto out = MatMulOp::forward(make_tensor({1,2,3,4,5,6}, {2,3}),
+                                 make_tensor({1,2,3,4,5,6}, {3,2}));
+    EXPECT_TRUE(out.is_contiguous());
+}
+
+TEST_F(MatMulOpForwardTest, AlwaysProducesNoMeta) {
+    // forward is pure computation — autograd wiring is matmul()'s responsibility.
+    auto A = make_tensor({1,2,3,4}, {2,2}, /*requires_grad=*/true);
+    auto B = make_tensor({1,2,3,4}, {2,2}, /*requires_grad=*/true);
+    auto out = MatMulOp::forward(A, B);
+    EXPECT_EQ(out.autograd_meta, nullptr);
+}
+
+TEST_F(MatMulOpForwardTest, Compute2x3by3x2) {
+    // A = [[1,2,3],[4,5,6]]   B = [[7,8],[9,10],[11,12]]
     // C[0,0] = 1*7  + 2*9  + 3*11 = 58
     // C[0,1] = 1*8  + 2*10 + 3*12 = 64
     // C[1,0] = 4*7  + 5*9  + 6*11 = 139
     // C[1,1] = 4*8  + 5*10 + 6*12 = 154
-    Tensor matrix_a = Tensor::from_data({1, 2, 3, 4, 5, 6},       {2, 3});
-    Tensor matrix_b = Tensor::from_data({7, 8, 9, 10, 11, 12},    {3, 2});
-    Tensor result   = MatMulOp::forward(matrix_a, matrix_b);
+    auto A = make_tensor({1,2,3,4,5,6},    {2,3});
+    auto B = make_tensor({7,8,9,10,11,12}, {3,2});
+    auto C = MatMulOp::forward(A, B);
 
-    EXPECT_FLOAT_EQ(result.at(0, 0),  58.f);
-    EXPECT_FLOAT_EQ(result.at(0, 1),  64.f);
-    EXPECT_FLOAT_EQ(result.at(1, 0), 139.f);
-    EXPECT_FLOAT_EQ(result.at(1, 1), 154.f);
+    EXPECT_FLOAT_EQ(C(0,0),  58.f);
+    EXPECT_FLOAT_EQ(C(0,1),  64.f);
+    EXPECT_FLOAT_EQ(C(1,0), 139.f);
+    EXPECT_FLOAT_EQ(C(1,1), 154.f);
 }
 
-TEST(MatMulOpForward, MultiplyByIdentityLeavesMatrixUnchanged) {
-    // X @ I must equal X for any X.  This checks every element so that a
-    // systematic offset in the index arithmetic would be caught.
-    Tensor identity = Tensor::from_data({1, 0, 0,
-                                         0, 1, 0,
-                                         0, 0, 1}, {3, 3});
-    Tensor matrix_x = Tensor::from_data({1, 2, 3,
-                                         4, 5, 6,
-                                         7, 8, 9}, {3, 3});
-    Tensor result   = MatMulOp::forward(matrix_x, identity);
-
-    for (int64_t row = 0; row < 3; ++row) {
-        for (int64_t col = 0; col < 3; ++col) {
-            EXPECT_FLOAT_EQ(result.at(row, col), matrix_x.at(row, col))
-                << "mismatch at [" << row << ", " << col << "]";
-        }
-    }
+TEST_F(MatMulOpForwardTest, MultiplyByIdentity) {
+    auto I = make_tensor({1,0,0, 0,1,0, 0,0,1}, {3,3});
+    auto X = make_tensor({1,2,3, 4,5,6, 7,8,9}, {3,3});
+    auto R = MatMulOp::forward(X, I);
+    for (size_t i = 0; i < 3; ++i)
+        for (size_t j = 0; j < 3; ++j)
+            EXPECT_FLOAT_EQ(R(i,j), X(i,j)) << "mismatch at [" << i << "," << j << "]";
 }
 
-TEST(MatMulOpForward, MultiplyByZeroMatrixProducesAllZeros) {
-    Tensor matrix_a = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor zero_b   = Tensor::zeros({3, 2});
-    Tensor result   = MatMulOp::forward(matrix_a, zero_b);
-
-    for (int64_t row = 0; row < 2; ++row) {
-        for (int64_t col = 0; col < 2; ++col) {
-            EXPECT_FLOAT_EQ(result.at(row, col), 0.f)
-                << "expected 0 at [" << row << ", " << col << "]";
-        }
-    }
+TEST_F(MatMulOpForwardTest, MultiplyByZero) {
+    auto A = make_tensor({1,2,3,4,5,6}, {2,3});
+    auto Z = Tensor::zeros(make_shape({3,2}), 2);
+    auto R = MatMulOp::forward(A, Z);
+    for (size_t i = 0; i < R.numel; ++i)
+        EXPECT_FLOAT_EQ(R.flat(i), 0.f);
 }
 
-TEST(MatMulOpForward, ComputesCorrectColumnVectorProduct) {
-    // A = [1 2 3]    v = [1]    Av = [1*1 + 2*2 + 3*3] = [14]
-    //     [4 5 6]        [2]         [4*1 + 5*2 + 6*3]   [32]
-    //                    [3]
-    Tensor matrix_a = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor vector_v = Tensor::from_data({1, 2, 3},           {3, 1});
-    Tensor result   = MatMulOp::forward(matrix_a, vector_v);
-
-    EXPECT_FLOAT_EQ(result.at(0, 0), 14.f);
-    EXPECT_FLOAT_EQ(result.at(1, 0), 32.f);
+TEST_F(MatMulOpForwardTest, ColumnVectorProduct) {
+    // A = [[1,2,3],[4,5,6]]   v = [[1],[2],[3]]
+    // Av = [[14],[32]]
+    auto A = make_tensor({1,2,3,4,5,6}, {2,3});
+    auto v = make_tensor({1,2,3},        {3,1});
+    auto R = MatMulOp::forward(A, v);
+    EXPECT_FLOAT_EQ(R(0,0), 14.f);
+    EXPECT_FLOAT_EQ(R(1,0), 32.f);
 }
 
-TEST(MatMulOpForward, OutputIsAlwaysContiguous) {
-    // forward() allocates with Tensor::zeros which is always contiguous.
-    // Operations downstream that assume contiguity must not be surprised.
-    Tensor matrix_a = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor matrix_b = Tensor::from_data({1, 2, 3, 4, 5, 6}, {3, 2});
-    Tensor result   = MatMulOp::forward(matrix_a, matrix_b);
+TEST_F(MatMulOpForwardTest, InnerDimMismatchAsserts) {
+    EXPECT_DEATH(MatMulOp::forward(Tensor::zeros(make_shape({2,3}), 2),
+                                   Tensor::zeros(make_shape({4,2}), 2)), "");
+}
 
-    EXPECT_TRUE(result.is_contiguous());
+TEST_F(MatMulOpForwardTest, NonTwoNdimAsserts) {
+    EXPECT_DEATH(MatMulOp::forward(Tensor::zeros(make_shape({2,3,4}), 3),
+                                   Tensor::zeros(make_shape({4,2,1}), 3)), "");
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 2.  MatMulForwardFastPath — contiguous inputs
+// 2. MatMulTransposedInput — non-contiguous inputs via T()
 //
-// The fast path uses raw pointer arithmetic and is only taken when all three
-// of A, B, and C are contiguous.  We verify the fast path is active by
-// confirming both inputs are contiguous before calling forward().
+// forward() is stride-aware so T() inputs (non-contiguous) must produce the
+// same result as explicitly transposed data would.
 // ════════════════════════════════════════════════════════════════════════════
 
-TEST(MatMulForwardFastPath, BothInputsContiguous) {
-    Tensor matrix_a = Tensor::from_data({1, 2, 3, 4, 5, 6},    {2, 3});
-    Tensor matrix_b = Tensor::from_data({7, 8, 9, 10, 11, 12}, {3, 2});
+class MatMulTransposedInput : public ::testing::Test {};
 
-    ASSERT_TRUE(matrix_a.is_contiguous());
-    ASSERT_TRUE(matrix_b.is_contiguous());
+TEST_F(MatMulTransposedInput, TransposedFirstInput) {
+    // A = [[1,3],[2,4]]  →  A.T() = [[1,2],[3,4]]
+    // A.T() @ I = A.T()
+    auto A = make_tensor({1,3,2,4}, {2,2});
+    auto I = make_tensor({1,0,0,1}, {2,2});
+    auto AT = A.T();
 
-    Tensor result = MatMulOp::forward(matrix_a, matrix_b);
+    ASSERT_FALSE(AT.is_contiguous());
 
-    EXPECT_FLOAT_EQ(result.at(0, 0),  58.f);
-    EXPECT_FLOAT_EQ(result.at(0, 1),  64.f);
-    EXPECT_FLOAT_EQ(result.at(1, 0), 139.f);
-    EXPECT_FLOAT_EQ(result.at(1, 1), 154.f);
+    auto R = MatMulOp::forward(AT, I);
+    EXPECT_FLOAT_EQ(R(0,0), 1.f);
+    EXPECT_FLOAT_EQ(R(0,1), 2.f);
+    EXPECT_FLOAT_EQ(R(1,0), 3.f);
+    EXPECT_FLOAT_EQ(R(1,1), 4.f);
+}
+
+TEST_F(MatMulTransposedInput, TransposedSecondInput) {
+    // B = [[1,3],[2,4]]  →  B.T() = [[1,2],[3,4]]
+    // I @ B.T() = B.T()
+    auto I = make_tensor({1,0,0,1}, {2,2});
+    auto B = make_tensor({1,3,2,4}, {2,2});
+    auto BT = B.T();
+
+    ASSERT_FALSE(BT.is_contiguous());
+
+    auto R = MatMulOp::forward(I, BT);
+    EXPECT_FLOAT_EQ(R(0,0), 1.f);
+    EXPECT_FLOAT_EQ(R(0,1), 2.f);
+    EXPECT_FLOAT_EQ(R(1,0), 3.f);
+    EXPECT_FLOAT_EQ(R(1,1), 4.f);
+}
+
+TEST_F(MatMulTransposedInput, ContiguousAndTransposedAgree) {
+    // Logical matrix X = [[1,2,3],[4,5,6]].
+    // Stored column-major as X_col = [[1,4],[2,5],[3,6]] — then X_col.T() gives X.
+    auto X_col = make_tensor({1,4,2,5,3,6}, {3,2});
+    auto X_T   = X_col.T();                          // non-contiguous [2,3]
+    auto B     = make_tensor({7,8,9,10,11,12}, {3,2});
+
+    auto contiguous = make_tensor({1,2,3,4,5,6}, {2,3});
+
+    auto slow_result = MatMulOp::forward(X_T, B);
+    auto fast_result = MatMulOp::forward(contiguous, B);
+
+    for (size_t i = 0; i < 2; ++i)
+        for (size_t j = 0; j < 2; ++j)
+            EXPECT_FLOAT_EQ(slow_result(i,j), fast_result(i,j))
+                << "mismatch at [" << i << "," << j << "]";
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 3.  MatMulForwardSlowPath — non-contiguous inputs
-//
-// The slow path is taken when at least one input has non-default strides
-// (e.g. after transpose()).  It uses at() which respects strides.
-// Testing this path separately ensures a bug in the stride-aware loop
-// cannot hide behind the fast path always being taken.
-// ════════════════════════════════════════════════════════════════════════════
-
-TEST(MatMulForwardSlowPath, NonContiguousFirstInput) {
-    // A^T is non-contiguous.  forward(A^T, B) exercises the slow path.
-    // We choose values so the result is easy to verify by hand.
-    //
-    // A = [1 3]   A^T = [1 2]   B = [1 0]
-    //     [2 4]         [3 4]       [0 1]
-    //
-    // A^T @ I = A^T = [1 2]
-    //                 [3 4]
-    Tensor matrix_a     = Tensor::from_data({1, 3, 2, 4}, {2, 2});
-    Tensor transposed_a = matrix_a.transpose();
-    Tensor identity     = Tensor::from_data({1, 0, 0, 1}, {2, 2});
-
-    ASSERT_FALSE(transposed_a.is_contiguous());
-
-    Tensor result = MatMulOp::forward(transposed_a, identity);
-
-    EXPECT_FLOAT_EQ(result.at(0, 0), 1.f);
-    EXPECT_FLOAT_EQ(result.at(0, 1), 2.f);
-    EXPECT_FLOAT_EQ(result.at(1, 0), 3.f);
-    EXPECT_FLOAT_EQ(result.at(1, 1), 4.f);
-}
-
-TEST(MatMulForwardSlowPath, NonContiguousSecondInput) {
-    // I @ B^T exercises the slow path on the second argument.
-    Tensor identity     = Tensor::from_data({1, 0, 0, 1}, {2, 2});
-    Tensor matrix_b     = Tensor::from_data({1, 3, 2, 4}, {2, 2});
-    Tensor transposed_b = matrix_b.transpose();
-
-    ASSERT_FALSE(transposed_b.is_contiguous());
-
-    // I @ B^T = B^T
-    Tensor result = MatMulOp::forward(identity, transposed_b);
-
-    EXPECT_FLOAT_EQ(result.at(0, 0), matrix_b.at(0, 0));
-    EXPECT_FLOAT_EQ(result.at(0, 1), matrix_b.at(1, 0));
-    EXPECT_FLOAT_EQ(result.at(1, 0), matrix_b.at(0, 1));
-    EXPECT_FLOAT_EQ(result.at(1, 1), matrix_b.at(1, 1));
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// 4.  MatMulForwardBothPaths — fast and slow must agree
-//
-// The two paths are alternative implementations of the same computation.
-// Any input that produces different results from the two paths is a bug
-// in one of them.  We compare them directly on the same data.
-// ════════════════════════════════════════════════════════════════════════════
-
-TEST(MatMulForwardBothPaths, FastAndSlowProduceIdenticalResults) {
-    Tensor matrix_a     = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor matrix_b     = Tensor::from_data({7, 8, 9, 10, 11, 12}, {3, 2});
-
-    // fast path: both contiguous
-    Tensor fast_result = MatMulOp::forward(matrix_a, matrix_b);
-
-    // slow path: make A non-contiguous by transposing twice
-    // (double transpose restores logical values but may not restore strides)
-    // Instead use a transposed input where we know the expected answer
-    // A^T has shape [3,2], so we need B of shape [2, N]
-    Tensor matrix_c         = Tensor::from_data({1, 4, 2, 5, 3, 6}, {3, 2});
-    Tensor transposed_c     = matrix_c.transpose();   // [2,3], non-contiguous
-    Tensor matrix_d         = Tensor::from_data({7, 8, 9, 10, 11, 12}, {3, 2});
-
-    ASSERT_FALSE(transposed_c.is_contiguous());
-    Tensor slow_result = MatMulOp::forward(transposed_c, matrix_d);
-
-    // transposed_c has the same logical values as matrix_a
-    for (int64_t row = 0; row < 2; ++row) {
-        for (int64_t col = 0; col < 2; ++col) {
-            EXPECT_FLOAT_EQ(slow_result.at(row, col),
-                            fast_result.at(row, col))
-                << "fast/slow disagreement at [" << row << ", " << col << "]";
-        }
-    }
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// 5.  MatMulOpBackward — gradient values in isolation
-//
-// backward() is tested directly here so that gradient value failures can be
-// separated from failures in the autograd graph wiring in the wrapper.
+// 3. MatMulOpBackwardTest — gradient values in isolation
 //
 // For C = A @ B with upstream gradient G (all ones):
 //   dA = G  @ B^T
 //   dB = A^T @ G
 //
-// A = [1 2 3]   B = [1]   G = [1]
-//     [4 5 6]       [2]       [1]
-//                   [3]
+// A = [[1,2,3],[4,5,6]]   B = [[1],[2],[3]]   G = [[1],[1]]
 //
-// dA = G @ B^T = [[1],[1]] @ [[1,2,3]] = [[1,2,3],[1,2,3]]
-// dB = A^T @ G = [[1,4],[2,5],[3,6]] @ [[1],[1]] = [[5],[7],[9]]
+// dA = [[1],[1]] @ [[1,2,3]]  = [[1,2,3],[1,2,3]]
+// dB = [[1,4],[2,5],[3,6]] @ [[1],[1]] = [[5],[7],[9]]
 // ════════════════════════════════════════════════════════════════════════════
 
-TEST(MatMulOpBackward, ReturnsExactlyTwoGradients) {
-    Tensor saved_a          = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor saved_b          = Tensor::from_data({1, 2, 3},           {3, 1});
-    Tensor upstream_grad    = Tensor::from_data({1, 1},               {2, 1});
+class MatMulOpBackwardTest : public ::testing::Test {};
 
-    std::vector<Tensor> gradients = MatMulOp::backward(
-        upstream_grad, saved_a, saved_b, true, true);
+TEST_F(MatMulOpBackwardTest, ReturnsTwoGradients) {
+    auto A    = make_tensor({1,2,3,4,5,6}, {2,3});
+    auto B    = make_tensor({1,2,3},        {3,1});
+    auto grad = make_tensor({1,1},          {2,1});
 
-    EXPECT_EQ(gradients.size(), 2u);
+    auto grads = MatMulOp::backward(grad, A, B);
+    EXPECT_EQ(grads.size(), 2u);
 }
 
-TEST(MatMulOpBackward, GradientForAIsCorrect) {
-    Tensor saved_a          = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor saved_b          = Tensor::from_data({1, 2, 3},           {3, 1});
-    Tensor upstream_grad    = Tensor::from_data({1, 1},               {2, 1});
+TEST_F(MatMulOpBackwardTest, GradAShape) {
+    auto A    = make_tensor({1,2,3,4,5,6}, {2,3});
+    auto B    = make_tensor({1,2,3},        {3,1});
+    auto grad = make_tensor({1,1},          {2,1});
 
-    std::vector<Tensor> gradients = MatMulOp::backward(
-        upstream_grad, saved_a, saved_b, true, true);
+    auto grads = MatMulOp::backward(grad, A, B);
+    EXPECT_EQ(grads[0].shape_at(0), 2u);
+    EXPECT_EQ(grads[0].shape_at(1), 3u);
+}
+
+TEST_F(MatMulOpBackwardTest, GradBShape) {
+    auto A    = make_tensor({1,2,3,4,5,6}, {2,3});
+    auto B    = make_tensor({1,2,3},        {3,1});
+    auto grad = make_tensor({1,1},          {2,1});
+
+    auto grads = MatMulOp::backward(grad, A, B);
+    EXPECT_EQ(grads[1].shape_at(0), 3u);
+    EXPECT_EQ(grads[1].shape_at(1), 1u);
+}
+
+TEST_F(MatMulOpBackwardTest, GradAValues) {
+    auto A    = make_tensor({1,2,3,4,5,6}, {2,3});
+    auto B    = make_tensor({1,2,3},        {3,1});
+    auto grad = make_tensor({1,1},          {2,1});
+
+    auto grads = MatMulOp::backward(grad, A, B);
 
     // dA = [[1],[1]] @ [[1,2,3]] = [[1,2,3],[1,2,3]]
-    EXPECT_FLOAT_EQ(gradients[0].at(0, 0), 1.f);
-    EXPECT_FLOAT_EQ(gradients[0].at(0, 1), 2.f);
-    EXPECT_FLOAT_EQ(gradients[0].at(0, 2), 3.f);
-    EXPECT_FLOAT_EQ(gradients[0].at(1, 0), 1.f);
-    EXPECT_FLOAT_EQ(gradients[0].at(1, 1), 2.f);
-    EXPECT_FLOAT_EQ(gradients[0].at(1, 2), 3.f);
+    EXPECT_FLOAT_EQ(grads[0](0,0), 1.f);
+    EXPECT_FLOAT_EQ(grads[0](0,1), 2.f);
+    EXPECT_FLOAT_EQ(grads[0](0,2), 3.f);
+    EXPECT_FLOAT_EQ(grads[0](1,0), 1.f);
+    EXPECT_FLOAT_EQ(grads[0](1,1), 2.f);
+    EXPECT_FLOAT_EQ(grads[0](1,2), 3.f);
 }
 
-TEST(MatMulOpBackward, GradientForBIsCorrect) {
-    Tensor saved_a          = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor saved_b          = Tensor::from_data({1, 2, 3},           {3, 1});
-    Tensor upstream_grad    = Tensor::from_data({1, 1},               {2, 1});
+TEST_F(MatMulOpBackwardTest, GradBValues) {
+    auto A    = make_tensor({1,2,3,4,5,6}, {2,3});
+    auto B    = make_tensor({1,2,3},        {3,1});
+    auto grad = make_tensor({1,1},          {2,1});
 
-    std::vector<Tensor> gradients = MatMulOp::backward(
-        upstream_grad, saved_a, saved_b, true, true);
+    auto grads = MatMulOp::backward(grad, A, B);
 
-    // dB = A^T @ G = [[1+4],[2+5],[3+6]] = [[5],[7],[9]]
-    EXPECT_FLOAT_EQ(gradients[1].at(0, 0), 5.f);
-    EXPECT_FLOAT_EQ(gradients[1].at(1, 0), 7.f);
-    EXPECT_FLOAT_EQ(gradients[1].at(2, 0), 9.f);
+    // dB = [[1,4],[2,5],[3,6]] @ [[1],[1]] = [[5],[7],[9]]
+    EXPECT_FLOAT_EQ(grads[1](0,0), 5.f);
+    EXPECT_FLOAT_EQ(grads[1](1,0), 7.f);
+    EXPECT_FLOAT_EQ(grads[1](2,0), 9.f);
 }
 
-TEST(MatMulOpBackward, GradientForAIsEmptyWhenNotRequired) {
-    // When rA=false backward() must leave gradients[0] as a default-constructed
-    // Tensor (no implementation).  Returning a real gradient for a tensor that
-    // does not require one would waste computation in training loops.
-    Tensor saved_a          = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor saved_b          = Tensor::from_data({1, 2, 3},           {3, 1});
-    Tensor upstream_grad    = Tensor::from_data({1, 1},               {2, 1});
+TEST_F(MatMulOpBackwardTest, GradAValues2x2) {
+    // A = [[1,2],[3,4]]   B = [[5,6],[7,8]]   G = [[1,1],[1,1]]
+    // dA = G @ B^T = [[1,1],[1,1]] @ [[5,7],[6,8]] = [[11,15],[11,15]]
+    auto A    = make_tensor({1,2,3,4}, {2,2});
+    auto B    = make_tensor({5,6,7,8}, {2,2});
+    auto grad = Tensor::ones(make_shape({2,2}), 2);
 
-    std::vector<Tensor> gradients = MatMulOp::backward(
-        upstream_grad, saved_a, saved_b, false, true);
+    auto grads = MatMulOp::backward(grad, A, B);
 
-    EXPECT_EQ(gradients[0].implementation, nullptr);
+    EXPECT_FLOAT_EQ(grads[0](0,0), 11.f);
+    EXPECT_FLOAT_EQ(grads[0](0,1), 15.f);
+    EXPECT_FLOAT_EQ(grads[0](1,0), 11.f);
+    EXPECT_FLOAT_EQ(grads[0](1,1), 15.f);
 }
 
-TEST(MatMulOpBackward, GradientForBIsEmptyWhenNotRequired) {
-    Tensor saved_a          = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor saved_b          = Tensor::from_data({1, 2, 3},           {3, 1});
-    Tensor upstream_grad    = Tensor::from_data({1, 1},               {2, 1});
+TEST_F(MatMulOpBackwardTest, GradBValues2x2) {
+    // dB = A^T @ G = [[1,3],[2,4]] @ [[1,1],[1,1]] = [[4,4],[6,6]]
+    auto A    = make_tensor({1,2,3,4}, {2,2});
+    auto B    = make_tensor({5,6,7,8}, {2,2});
+    auto grad = Tensor::ones(make_shape({2,2}), 2);
 
-    std::vector<Tensor> gradients = MatMulOp::backward(
-        upstream_grad, saved_a, saved_b, true, false);
+    auto grads = MatMulOp::backward(grad, A, B);
 
-    EXPECT_EQ(gradients[1].implementation, nullptr);
-}
-
-TEST(MatMulOpBackward, GradientShapeForAMatchesSavedA) {
-    Tensor saved_a          = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor saved_b          = Tensor::from_data({1, 2, 3},           {3, 1});
-    Tensor upstream_grad    = Tensor::from_data({1, 1},               {2, 1});
-
-    std::vector<Tensor> gradients = MatMulOp::backward(
-        upstream_grad, saved_a, saved_b, true, true);
-
-    EXPECT_EQ(gradients[0].shape(0), 2);
-    EXPECT_EQ(gradients[0].shape(1), 3);
-}
-
-TEST(MatMulOpBackward, GradientShapeForBMatchesSavedB) {
-    Tensor saved_a          = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3});
-    Tensor saved_b          = Tensor::from_data({1, 2, 3},           {3, 1});
-    Tensor upstream_grad    = Tensor::from_data({1, 1},               {2, 1});
-
-    std::vector<Tensor> gradients = MatMulOp::backward(
-        upstream_grad, saved_a, saved_b, true, true);
-
-    EXPECT_EQ(gradients[1].shape(0), 3);
-    EXPECT_EQ(gradients[1].shape(1), 1);
+    EXPECT_FLOAT_EQ(grads[1](0,0), 4.f);
+    EXPECT_FLOAT_EQ(grads[1](0,1), 4.f);
+    EXPECT_FLOAT_EQ(grads[1](1,0), 6.f);
+    EXPECT_FLOAT_EQ(grads[1](1,1), 6.f);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 6.  MatMulAutograd — requires_grad propagation through the wrapper
-//
-// The public matmul() wrapper is responsible for creating the autograd node.
-// We test all four combinations of requires_grad on the two inputs.
+// 4. MatMulFuncTest — matmul() autograd wiring
 // ════════════════════════════════════════════════════════════════════════════
 
-TEST(MatMulAutograd, OutputRequiresGradWhenBothInputsDo) {
-    Tensor matrix_a = Tensor::from_data({1, 2, 3, 4}, {2, 2}, {}, true);
-    Tensor matrix_b = Tensor::from_data({1, 2, 3, 4}, {2, 2}, {}, true);
-    Tensor result   = matmul(matrix_a, matrix_b);
+class MatMulFuncTest : public ::testing::Test {};
 
-    EXPECT_TRUE(result.requires_grad());
+TEST_F(MatMulFuncTest, ProducesCorrectValues) {
+    auto A   = make_tensor({1,2,3,4,5,6}, {2,3});
+    auto B   = make_tensor({1,2,3},        {3,1});
+    auto C   = matmul(A, B);
+    // [[1*1+2*2+3*3],[4*1+5*2+6*3]] = [[14],[32]]
+    EXPECT_FLOAT_EQ(C(0,0), 14.f);
+    EXPECT_FLOAT_EQ(C(1,0), 32.f);
 }
 
-TEST(MatMulAutograd, OutputRequiresGradWhenOnlyADoes) {
-    Tensor matrix_a = Tensor::from_data({1, 2, 3, 4}, {2, 2}, {}, true);
-    Tensor matrix_b = Tensor::from_data({1, 2, 3, 4}, {2, 2}, {}, false);
-    Tensor result   = matmul(matrix_a, matrix_b);
-
-    EXPECT_TRUE(result.requires_grad());
+TEST_F(MatMulFuncTest, NoRequiresGradProducesNoMeta) {
+    auto C = matmul(make_tensor({1,2,3,4}, {2,2}),
+                    make_tensor({1,2,3,4}, {2,2}));
+    EXPECT_EQ(C.autograd_meta, nullptr);
+    EXPECT_FALSE(C.requires_grad());
 }
 
-TEST(MatMulAutograd, OutputRequiresGradWhenOnlyBDoes) {
-    Tensor matrix_a = Tensor::from_data({1, 2, 3, 4}, {2, 2}, {}, false);
-    Tensor matrix_b = Tensor::from_data({1, 2, 3, 4}, {2, 2}, {}, true);
-    Tensor result   = matmul(matrix_a, matrix_b);
-
-    EXPECT_TRUE(result.requires_grad());
+TEST_F(MatMulFuncTest, BothRequireGrad) {
+    auto C = matmul(make_tensor({1,2,3,4}, {2,2}, true),
+                    make_tensor({1,2,3,4}, {2,2}, true));
+    EXPECT_TRUE(C.requires_grad());
 }
 
-TEST(MatMulAutograd, OutputDoesNotRequireGradWhenNeitherInputDoes) {
-    Tensor matrix_a = Tensor::from_data({1, 2, 3, 4}, {2, 2}, {}, false);
-    Tensor matrix_b = Tensor::from_data({1, 2, 3, 4}, {2, 2}, {}, false);
-    Tensor result   = matmul(matrix_a, matrix_b);
-
-    EXPECT_FALSE(result.requires_grad());
+TEST_F(MatMulFuncTest, OnlyARequiresGrad) {
+    auto C = matmul(make_tensor({1,2,3,4}, {2,2}, true),
+                    make_tensor({1,2,3,4}, {2,2}, false));
+    EXPECT_TRUE(C.requires_grad());
 }
 
-TEST(MatMulAutograd, OutputHasNoGradBeforeBackward) {
-    Tensor matrix_a = Tensor::from_data({1, 2, 3, 4}, {2, 2}, {}, true);
-    Tensor matrix_b = Tensor::from_data({1, 2, 3, 4}, {2, 2}, {}, true);
-    Tensor result   = matmul(matrix_a, matrix_b);
-
-    EXPECT_FALSE(result.has_grad());
+TEST_F(MatMulFuncTest, OnlyBRequiresGrad) {
+    auto C = matmul(make_tensor({1,2,3,4}, {2,2}, false),
+                    make_tensor({1,2,3,4}, {2,2}, true));
+    EXPECT_TRUE(C.requires_grad());
 }
 
-TEST(MatMulAutograd, NoAutogradMetaWhenNeitherInputRequiresGrad) {
-    // When neither input requires grad no graph node must be created.
-    // Inserting a node would waste memory proportional to the number of
-    // operations in the forward pass.
-    Tensor matrix_a = Tensor::from_data({1, 2, 3, 4}, {2, 2}, {}, false);
-    Tensor matrix_b = Tensor::from_data({1, 2, 3, 4}, {2, 2}, {}, false);
-    Tensor result   = matmul(matrix_a, matrix_b);
-
-    EXPECT_EQ(result.autograd_meta, nullptr);
+TEST_F(MatMulFuncTest, NoGradBeforeBackward) {
+    auto C = matmul(make_tensor({1,2,3,4}, {2,2}, true),
+                    make_tensor({1,2,3,4}, {2,2}, true));
+    EXPECT_FALSE(C.has_grad());
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 7.  MatMulBackwardValues — full backward pass through the wrapper
-//
-// These tests call backward() on the output of matmul() and verify that
-// gradients accumulated on the input leaf tensors are numerically correct.
-// This exercises the complete path: forward → graph node → backward.
+// 5. MatMulAutogradTest — full backward() through matmul()
 // ════════════════════════════════════════════════════════════════════════════
 
-TEST(MatMulBackwardValues, GradientAccumulatesOnAAfterBackward) {
-    Tensor matrix_a = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3}, {}, true);
-    Tensor matrix_b = Tensor::from_data({1, 2, 3},           {3, 1}, {}, true);
-    Tensor result   = matmul(matrix_a, matrix_b);
+class MatMulAutogradTest : public ::testing::Test {};
 
-    backward(result);
+TEST_F(MatMulAutogradTest, GradOnAAfterBackward) {
+    auto A = make_tensor({1,2,3,4,5,6}, {2,3}, true);
+    auto B = make_tensor({1,2,3},        {3,1}, true);
+    auto C = matmul(A, B);
+    backward(C);
 
-    ASSERT_TRUE(matrix_a.has_grad());
-    EXPECT_FLOAT_EQ(matrix_a.grad().at(0, 0), 1.f);
-    EXPECT_FLOAT_EQ(matrix_a.grad().at(0, 1), 2.f);
-    EXPECT_FLOAT_EQ(matrix_a.grad().at(0, 2), 3.f);
-    EXPECT_FLOAT_EQ(matrix_a.grad().at(1, 0), 1.f);
-    EXPECT_FLOAT_EQ(matrix_a.grad().at(1, 1), 2.f);
-    EXPECT_FLOAT_EQ(matrix_a.grad().at(1, 2), 3.f);
+    ASSERT_TRUE(A.has_grad());
+    // dA = [[1],[1]] @ [[1,2,3]] = [[1,2,3],[1,2,3]]
+    EXPECT_FLOAT_EQ(A.grad()(0,0), 1.f);
+    EXPECT_FLOAT_EQ(A.grad()(0,1), 2.f);
+    EXPECT_FLOAT_EQ(A.grad()(0,2), 3.f);
+    EXPECT_FLOAT_EQ(A.grad()(1,0), 1.f);
+    EXPECT_FLOAT_EQ(A.grad()(1,1), 2.f);
+    EXPECT_FLOAT_EQ(A.grad()(1,2), 3.f);
 }
 
-TEST(MatMulBackwardValues, GradientAccumulatesOnBAfterBackward) {
-    Tensor matrix_a = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3}, {}, true);
-    Tensor matrix_b = Tensor::from_data({1, 2, 3},           {3, 1}, {}, true);
-    Tensor result   = matmul(matrix_a, matrix_b);
+TEST_F(MatMulAutogradTest, GradOnBAfterBackward) {
+    auto A = make_tensor({1,2,3,4,5,6}, {2,3}, true);
+    auto B = make_tensor({1,2,3},        {3,1}, true);
+    auto C = matmul(A, B);
+    backward(C);
 
-    backward(result);
-
-    ASSERT_TRUE(matrix_b.has_grad());
-    EXPECT_FLOAT_EQ(matrix_b.grad().at(0, 0), 5.f);
-    EXPECT_FLOAT_EQ(matrix_b.grad().at(1, 0), 7.f);
-    EXPECT_FLOAT_EQ(matrix_b.grad().at(2, 0), 9.f);
+    ASSERT_TRUE(B.has_grad());
+    // dB = A^T @ [[1],[1]] = [[5],[7],[9]]
+    EXPECT_FLOAT_EQ(B.grad()(0,0), 5.f);
+    EXPECT_FLOAT_EQ(B.grad()(1,0), 7.f);
+    EXPECT_FLOAT_EQ(B.grad()(2,0), 9.f);
 }
 
-TEST(MatMulBackwardValues, OnlyAReceivesGradWhenOnlyARequiresIt) {
-    Tensor matrix_a = Tensor::from_data({1, 2, 3, 4}, {2, 2}, {}, true);
-    Tensor matrix_b = Tensor::from_data({1, 2, 3, 4}, {2, 2}, {}, false);
-    Tensor result   = matmul(matrix_a, matrix_b);
-
-    backward(result);
-
-    EXPECT_TRUE(matrix_a.has_grad());
-    EXPECT_FALSE(matrix_b.has_grad());
+TEST_F(MatMulAutogradTest, OnlyAReceivesGrad) {
+    auto A = make_tensor({1,2,3,4}, {2,2}, true);
+    auto B = make_tensor({1,2,3,4}, {2,2}, false);
+    auto C = matmul(A, B);
+    backward(C);
+    EXPECT_TRUE(A.has_grad());
+    EXPECT_FALSE(B.has_grad());
 }
 
-TEST(MatMulBackwardValues, OnlyBReceivesGradWhenOnlyBRequiresIt) {
-    Tensor matrix_a = Tensor::from_data({1, 2, 3, 4}, {2, 2}, {}, false);
-    Tensor matrix_b = Tensor::from_data({1, 2, 3, 4}, {2, 2}, {}, true);
-    Tensor result   = matmul(matrix_a, matrix_b);
-
-    backward(result);
-
-    EXPECT_FALSE(matrix_a.has_grad());
-    EXPECT_TRUE(matrix_b.has_grad());
+TEST_F(MatMulAutogradTest, OnlyBReceivesGrad) {
+    auto A = make_tensor({1,2,3,4}, {2,2}, false);
+    auto B = make_tensor({1,2,3,4}, {2,2}, true);
+    auto C = matmul(A, B);
+    backward(C);
+    EXPECT_FALSE(A.has_grad());
+    EXPECT_TRUE(B.has_grad());
 }
 
-TEST(MatMulBackwardValues, GradientShapeMatchesInputShape) {
-    // The gradient of A must have the same shape as A — not the shape of
-    // the output.  A shape mismatch here would crash any optimizer that
-    // subtracts the gradient from the parameter in-place.
-    Tensor matrix_a = Tensor::from_data({1, 2, 3, 4, 5, 6}, {2, 3}, {}, true);
-    Tensor matrix_b = Tensor::from_data({1, 2, 3, 4, 5, 6}, {3, 2}, {}, true);
-    Tensor result   = matmul(matrix_a, matrix_b);
-
-    backward(result);
-
-    EXPECT_EQ(matrix_a.grad().shape(0), 2);
-    EXPECT_EQ(matrix_a.grad().shape(1), 3);
-    EXPECT_EQ(matrix_b.grad().shape(0), 3);
-    EXPECT_EQ(matrix_b.grad().shape(1), 2);
+TEST_F(MatMulAutogradTest, GradShapeMatchesInput) {
+    auto A = make_tensor({1,2,3,4,5,6}, {2,3}, true);
+    auto B = make_tensor({1,2,3,4,5,6}, {3,2}, true);
+    auto C = matmul(A, B);
+    backward(C);
+    EXPECT_EQ(A.grad().shape_at(0), 2u);  EXPECT_EQ(A.grad().shape_at(1), 3u);
+    EXPECT_EQ(B.grad().shape_at(0), 3u);  EXPECT_EQ(B.grad().shape_at(1), 2u);
 }
 
-TEST(MatMulBackwardValues, SavedTensorsAreNotAliasedToInputs) {
-    // matmul() clones A and B before capturing them in the backward closure.
-    // If it captured references instead, mutating A or B after the forward
-    // pass would corrupt the saved tensors and produce wrong gradients.
-    Tensor matrix_a = Tensor::from_data({1, 2, 3, 4}, {2, 2}, {}, true);
-    Tensor matrix_b = Tensor::from_data({1, 2, 3, 4}, {2, 2}, {}, true);
-    Tensor result   = matmul(matrix_a, matrix_b);
-
-    // mutate inputs after forward but before backward
-    matrix_a.at(0, 0) = 999.f;
-    matrix_b.at(0, 0) = 999.f;
-
-    // backward must still produce gradients based on the original values,
-    // not the mutated ones — so it must not throw or produce NaN/Inf
-    EXPECT_NO_THROW(backward(result));
-    EXPECT_TRUE(matrix_a.has_grad());
-    EXPECT_TRUE(matrix_b.has_grad());
+TEST_F(MatMulAutogradTest, ForwardValuesUnchangedAfterBackward) {
+    auto A = make_tensor({1,2,3,4}, {2,2}, true);
+    auto B = make_tensor({5,6,7,8}, {2,2}, true);
+    auto C = matmul(A, B);
+    float c00 = C(0,0), c01 = C(0,1), c10 = C(1,0), c11 = C(1,1);
+    backward(C);
+    EXPECT_FLOAT_EQ(C(0,0), c00);
+    EXPECT_FLOAT_EQ(C(0,1), c01);
+    EXPECT_FLOAT_EQ(C(1,0), c10);
+    EXPECT_FLOAT_EQ(C(1,1), c11);
 }
