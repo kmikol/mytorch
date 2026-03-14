@@ -1,57 +1,53 @@
 #pragma once
-#include <vector>
-#include <cmath>
-#include "tensorlib.h"
 
+#include <vector>
+
+#include "autograd.h"
+
+
+/**
+ * Element-wise sigmoid activation: out = 1 / (1 + exp(-x)).
+ *
+ * The forward and backward passes are separated so each can be tested and
+ * reasoned about independently. Use the free function sigmoid() for the
+ * differentiable version that wires both into the autograd graph.
+ */
 struct SigmoidOp {
 
-    static Tensor forward(const Tensor& x) {
-        int64_t rows = x.shape(0), cols = x.shape(1);
-        Tensor out = Tensor::zeros({rows, cols});
-        for (int64_t r = 0; r < rows; r++)
-            for (int64_t c = 0; c < cols; c++)
-                out.at(r,c) = 1.f / (1.f + std::exp(-x.at(r,c)));
-        return out;
-    }
+    /**
+     * Compute out[i] = 1 / (1 + exp(-x[i])) element-wise.
+     *
+     * Returns a fresh contiguous tensor of the same shape as x.
+     * Does not touch the autograd graph.
+     */
+    static Tensor forward(const Tensor& x);
 
-    // needs saved_out because the derivative is: out * (1 - out)
-    // we don't need the original input — just what came out of sigmoid
-    static std::vector<Tensor> backward(
-        const Tensor& grad,
-        const Tensor& saved_out)
-    {
-        int64_t rows = grad.shape(0), cols = grad.shape(1);
-        Tensor dx = Tensor::zeros({rows, cols});
-        for (int64_t r = 0; r < rows; r++)
-            for (int64_t c = 0; c < cols; c++) {
-                float s = saved_out.at(r,c);
-                dx.at(r,c) = grad.at(r,c) * s * (1.f - s);
-            }
-        return {dx};
-    }
+    /**
+     * Compute the input gradient given the upstream gradient.
+     *
+     *   dL/dx[i] = grad[i] * out[i] * (1 - out[i])
+     *
+     * WHY the backward takes the forward OUTPUT (not the input):
+     *   The sigmoid derivative σ'(x) = σ(x)(1−σ(x)) is most cheaply expressed
+     *   in terms of the already-computed output. Re-computing exp(-x) from x
+     *   would cost an extra pass; using the saved output costs nothing extra.
+     *
+     * @param grad  Upstream gradient (same shape as the forward output).
+     * @param out   Forward output saved at forward time (i.e. σ(x)).
+     * @return      {grad_x} — contiguous, same shape as out.
+     */
+    static Tensor backward(const Tensor& grad, const Tensor& out);
 };
 
-inline Tensor sigmoid(const Tensor& x) {
-    assert(x.ndim() == 2);
 
-    Tensor out = SigmoidOp::forward(x);
-
-    if (grad_mode_enabled && x.requires_grad()) {
-        NoGradGuard no_grad;
-
-        // capture implementation only — sigmoid needs the output values
-        // for its backward (s * (1 - s)), not the input
-        auto implOut = out.implementation;
-
-        out.autograd_meta = make_grad_meta(
-            "sigmoid",
-            {x.autograd_meta},
-            [implOut](const Tensor& grad) {
-                Tensor saved_out;
-                saved_out.implementation = implOut;
-                return SigmoidOp::backward(grad, saved_out);
-            });
-    }
-
-    return out;
-}
+/**
+ * Differentiable sigmoid: out = 1 / (1 + exp(-x)).
+ *
+ * Calls SigmoidOp::forward for the computation. When x requires a gradient
+ * and grad_mode is enabled, registers a backward node so that backward() can
+ * propagate gradients through this operation.
+ *
+ * The forward OUTPUT (not the input) is captured inside the backward closure,
+ * since the sigmoid derivative is σ(x)(1−σ(x)).
+ */
+Tensor sigmoid(const Tensor& x);

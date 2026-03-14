@@ -64,10 +64,12 @@ void backward(Tensor& output) {
                 // First gradient arriving at this node — store a contiguous copy.
                 input_meta->grad = std::make_shared<Tensor>(input_grads[j].clone());
             } else {
-                // Accumulate: grad tensors are always contiguous, so flat loop is safe.
-                size_t n = input_meta->grad->numel;
+                // Accumulate: grad tensors are always contiguous (created via clone/zeros).
+                size_t n    = input_meta->grad->numel;
+                float* dst  = input_meta->grad->storage->data;
+                const float* src = input_grads[j].storage->data;
                 for (size_t k = 0; k < n; ++k)
-                    input_meta->grad->flat(k) += input_grads[j].flat(k);
+                    dst[k] += src[k];
             }
         }
     }

@@ -103,43 +103,6 @@ Tensor Tensor::grad() const {
 
 
 // ----------------------------------
-//          Flat indexing
-// ----------------------------------
-
-// Maps logical flat index i to the correct storage position.
-// For a contiguous tensor this is offset + i.
-// For a non-contiguous tensor (e.g. transposed) we decompose i into
-// per-dim indices using the contiguous strides, then apply the actual strides.
-float& Tensor::flat(size_t i) {
-    assert(i < numel);
-    if (is_contiguous()) return storage->data[offset + i];
-    size_t storage_idx = offset;
-    size_t rem = i;
-    Strides cs = strides_from_shape(shape, ndim);
-    for (size_t d = 0; d < ndim; ++d) {
-        size_t dim_idx  = rem / cs[d];
-        rem            %= cs[d];
-        storage_idx    += dim_idx * strides[d];
-    }
-    return storage->data[storage_idx];
-}
-
-const float& Tensor::flat(size_t i) const {
-    assert(i < numel);
-    if (is_contiguous()) return storage->data[offset + i];
-    size_t storage_idx = offset;
-    size_t rem = i;
-    Strides cs = strides_from_shape(shape, ndim);
-    for (size_t d = 0; d < ndim; ++d) {
-        size_t dim_idx  = rem / cs[d];
-        rem            %= cs[d];
-        storage_idx    += dim_idx * strides[d];
-    }
-    return storage->data[storage_idx];
-}
-
-
-// ----------------------------------
 //             Clone
 // ----------------------------------
 

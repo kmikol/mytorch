@@ -80,16 +80,6 @@ class Tensor {
         }
 
         // ----------------------------------
-        //          Flat indexing
-        // ----------------------------------
-
-        // Logical flat index i → the i-th element in row-major order.
-        // Works for both contiguous and non-contiguous tensors (e.g. transposed).
-        // Prefer this over operator() in op loops — single index, no pack expansion.
-        float&       flat(size_t i);
-        const float& flat(size_t i) const;
-
-        // ----------------------------------
         //          Per-dim accessors
         // ----------------------------------
 

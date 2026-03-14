@@ -35,7 +35,7 @@ static Tensor make_tensor(std::initializer_list<float>  data,
 
     Tensor t(s, ndim, requires_grad);
     size_t i = 0;
-    for (float v : data) t.flat(i++) = v;
+    for (float v : data) t.storage->data[i++] = v;
     return t;
 }
 
@@ -118,7 +118,7 @@ TEST_F(MatMulOpForwardTest, MultiplyByZero) {
     auto Z = Tensor::zeros(make_shape({3,2}), 2);
     auto R = MatMulOp::forward(A, Z);
     for (size_t i = 0; i < R.numel; ++i)
-        EXPECT_FLOAT_EQ(R.flat(i), 0.f);
+        EXPECT_FLOAT_EQ(R.storage->data[i], 0.f);
 }
 
 TEST_F(MatMulOpForwardTest, ColumnVectorProduct) {
