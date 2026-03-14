@@ -14,7 +14,6 @@
 #include "layers/linear.h"
 #include "loss_functions/cross_entropy.h"
 #include "ops/activations/relu.h"
-#include "ops/activations/sigmoid.h"
 #include "optim/sgd.h"
 
 namespace {
@@ -48,9 +47,8 @@ static float train_one_epoch(DataLoader& loader,
 
         Tensor h = relu(l1.forward(inputs));
         Tensor logits = l2.forward(h);
-        Tensor probs = sigmoid(logits);
 
-        Tensor loss = cross_entropy(probs, targets);
+        Tensor loss = cross_entropy(logits, targets);
         loss_sum += loss(0);
         ++batches;
 

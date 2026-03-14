@@ -3,7 +3,11 @@ project(myml CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_BUILD_TYPE Debug)
+
+# Default to Debug when no build type is explicitly provided.
+if (NOT CMAKE_BUILD_TYPE)
+     set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
+endif()
 
 
 # ──────────────────────────────────────────────────────────────
@@ -14,11 +18,15 @@ file(GLOB_RECURSE LIB_SOURCES CONFIGURE_DEPENDS "src/*.cpp")
 
 file(GLOB_RECURSE UNIT_TEST_SOURCES
      CONFIGURE_DEPENDS
-     "tests/unit/test_*.cpp")
+     "tests/unit/*.cpp")
 
-# file(GLOB_RECURSE SMOKE_TEST_SOURCES
-#      CONFIGURE_DEPENDS
-#      "tests/smoke/test_*.cpp")
+file(GLOB_RECURSE SMOKE_TEST_SOURCES
+     CONFIGURE_DEPENDS
+     "tests/smoke/*.cpp")
+
+file(GLOB_RECURSE DATASET_TEST_SOURCES
+     CONFIGURE_DEPENDS
+     "tests/datasets/*.cpp")
 
 # ──────────────────────────────────────────────────────────────
 # libraries
@@ -54,13 +62,20 @@ target_link_libraries(unit_tests_cov  PRIVATE myml_lib_cov GTest::gtest_main)
 # smoke test binaries
 # ──────────────────────────────────────────────────────────────
 
-# add_executable(smoke_tests ${SMOKE_TEST_SOURCES})
-# target_link_libraries(smoke_tests PRIVATE myml_lib GTest::gtest_main)
+add_executable(smoke_tests ${SMOKE_TEST_SOURCES})
+target_link_libraries(smoke_tests PRIVATE myml_lib GTest::gtest_main)
 
-# add_executable(smoke_tests_cov ${SMOKE_TEST_SOURCES})
-# target_compile_options(smoke_tests_cov PRIVATE --coverage -O3 -fno-inline)
-# target_link_options(smoke_tests_cov    PRIVATE --coverage)
-# target_link_libraries(smoke_tests_cov  PRIVATE myml_lib_cov GTest::gtest_main)
+add_executable(smoke_tests_cov ${SMOKE_TEST_SOURCES})
+target_compile_options(smoke_tests_cov PRIVATE --coverage -O3 -fno-inline)
+target_link_options(smoke_tests_cov    PRIVATE --coverage)
+target_link_libraries(smoke_tests_cov  PRIVATE myml_lib_cov GTest::gtest_main)
+
+# ──────────────────────────────────────────────────────────────
+# dataset test binaries
+# ──────────────────────────────────────────────────────────────
+
+add_executable(dataset_tests ${DATASET_TEST_SOURCES})
+target_link_libraries(dataset_tests PRIVATE myml_lib GTest::gtest_main)
 
 # ──────────────────────────────────────────────────────────────
 # test discovery
@@ -70,7 +85,8 @@ enable_testing()
 include(GoogleTest)
 
 gtest_discover_tests(unit_tests  PROPERTIES LABELS "unit")
-# gtest_discover_tests(smoke_tests PROPERTIES LABELS "smoke")
+gtest_discover_tests(smoke_tests PROPERTIES LABELS "smoke")
+gtest_discover_tests(dataset_tests PROPERTIES LABELS "datasets")
 
 
 # ──────────────────────────────────────────────────────────────
