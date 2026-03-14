@@ -1,306 +1,245 @@
 #include <gtest/gtest.h>
+#include <cstddef>
 #include <cmath>
-#include "tensorlib.h"
-#include "ops/ops.h"
+
 #include "loss_functions/cross_entropy.h"
 
-// ================================================================
-// helpers
-// ================================================================
+// ─────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────
 
-// recompute softmax for a single column — used to verify known values
-static std::vector<float> softmax_col(std::vector<float> v) {
-    float max_val = *std::max_element(v.begin(), v.end());
-    float sum = 0.f;
-    for (float& x : v) { x = std::exp(x - max_val); sum += x; }
-    for (float& x : v) x /= sum;
-    return v;
+static Shape make_shape(std::initializer_list<size_t> dims) {
+    Shape s{};
+    size_t i = 0;
+    for (size_t d : dims) s[i++] = d;
+    return s;
 }
 
-// ================================================================
-// forward
-// ================================================================
-
-TEST(CrossEntropyLossForward, OutputIsScalar) {
-    // loss should always be a [1,1] tensor regardless of input size
-    Tensor logits  = Tensor::from_data({1.f, 2.f, 3.f}, {3, 1});
-    Tensor targets = Tensor::from_data({2.f}, {1, 1});
-
-    Tensor loss = cross_entropy_loss(logits, targets);
-
-    EXPECT_EQ(loss.shape(0), 1);
-    EXPECT_EQ(loss.shape(1), 1);
+static Tensor make_tensor(std::initializer_list<size_t> dims,
+                          std::initializer_list<float> vals,
+                          bool requires_grad = false) {
+    Shape s = make_shape(dims);
+    size_t ndim = dims.size();
+    Tensor t(s, ndim, requires_grad);
+    size_t i = 0;
+    for (float v : vals) t.storage->data[i++] = v;
+    return t;
 }
 
-TEST(CrossEntropyLossForward, LossIsNonNegative) {
-    // cross-entropy is always >= 0
-    Tensor logits  = Tensor::from_data({2.f, 1.f, 0.5f}, {3, 1});
-    Tensor targets = Tensor::from_data({0.f}, {1, 1});
+// ─────────────────────────────────────────────
+// CrossEntropyOp::forward — pure computation
+// ─────────────────────────────────────────────
 
-    Tensor loss = cross_entropy_loss(logits, targets);
+class CrossEntropyOpForwardTest : public ::testing::Test {};
 
-    EXPECT_GE(loss.at(0, 0), 0.f);
+TEST_F(CrossEntropyOpForwardTest, OutputIsScalar) {
+    auto probs   = make_tensor({2, 3}, {0.1f, 0.7f, 0.2f, 0.3f, 0.3f, 0.4f});
+    auto targets = make_tensor({2, 3}, {0.f,  1.f,  0.f,  1.f,  0.f,  0.f});
+    auto loss    = CrossEntropyOp::forward(probs, targets);
+    EXPECT_EQ(loss.ndim, 1u);
+    EXPECT_EQ(loss.shape_at(0), 1u);
+    EXPECT_EQ(loss.numel, 1u);
 }
 
-TEST(CrossEntropyLossForward, KnownValueSingleSample) {
-    // manual calculation:
-    // logits = [1, 0], target = 0
-    // max = 1
-    // sum_exp = exp(0) + exp(-1) = 1 + 0.3679 = 1.3679
-    // log_normaliser = log(1.3679) + 1 = 0.3133 + 1 = 1.3133
-    // loss = -logits[0] + log_normaliser = -1 + 1.3133 = 0.3133
-    Tensor logits  = Tensor::from_data({1.f, 0.f}, {2, 1});
-    Tensor targets = Tensor::from_data({0.f}, {1, 1});
-
-    Tensor loss = cross_entropy_loss(logits, targets);
-
-    EXPECT_NEAR(loss.at(0, 0), 0.3133f, 1e-3f);
+TEST_F(CrossEntropyOpForwardTest, PerfectPredictionIsNearZero) {
+    // When predicted probability for the correct class is ~1, loss is ~0.
+    auto probs   = make_tensor({1, 3}, {1.f - 2e-6f, 1e-6f, 1e-6f});
+    auto targets = make_tensor({1, 3}, {1.f, 0.f, 0.f});
+    auto loss    = CrossEntropyOp::forward(probs, targets);
+    EXPECT_NEAR(loss(0), 0.f, 1e-5f);
 }
 
-TEST(CrossEntropyLossForward, UniformLogitsGiveLogC) {
-    // when all logits are equal, softmax is uniform (1/C each)
-    // cross-entropy = -log(1/C) = log(C)
-    // for C=4: log(4) ≈ 1.3863
-    Tensor logits  = Tensor::from_data({0.f, 0.f, 0.f, 0.f}, {4, 1});
-    Tensor targets = Tensor::from_data({2.f}, {1, 1});
-
-    Tensor loss = cross_entropy_loss(logits, targets);
-
-    EXPECT_NEAR(loss.at(0, 0), std::log(4.f), 1e-5f);
+TEST_F(CrossEntropyOpForwardTest, UniformPredictionOnOneHot) {
+    // Uniform probs [1/3, 1/3, 1/3], one-hot target → loss = log(3) per sample.
+    float p = 1.f / 3.f;
+    auto probs   = make_tensor({1, 3}, {p, p, p});
+    auto targets = make_tensor({1, 3}, {1.f, 0.f, 0.f});
+    auto loss    = CrossEntropyOp::forward(probs, targets);
+    EXPECT_NEAR(loss(0), std::log(3.f), 1e-5f);
 }
 
-TEST(CrossEntropyLossForward, PerfectPredictionGivesLowLoss) {
-    // when the correct class has a very large logit, loss approaches 0
-    Tensor logits  = Tensor::from_data({100.f, -100.f, -100.f}, {3, 1});
-    Tensor targets = Tensor::from_data({0.f}, {1, 1});
-
-    Tensor loss = cross_entropy_loss(logits, targets);
-
-    EXPECT_NEAR(loss.at(0, 0), 0.f, 1e-3f);
+TEST_F(CrossEntropyOpForwardTest, MeanOverBatch) {
+    // Two identical samples — loss should equal the per-sample loss.
+    float p = 1.f / 3.f;
+    float ref = std::log(3.f);
+    auto probs   = make_tensor({2, 3}, {p, p, p,  p, p, p});
+    auto targets = make_tensor({2, 3}, {1.f, 0.f, 0.f,  1.f, 0.f, 0.f});
+    auto loss    = CrossEntropyOp::forward(probs, targets);
+    EXPECT_NEAR(loss(0), ref, 1e-5f);
 }
 
-TEST(CrossEntropyLossForward, WrongPredictionGivesHighLoss) {
-    // when the correct class has a very low logit, loss is large
-    Tensor logits  = Tensor::from_data({-100.f, 100.f, -100.f}, {3, 1});
-    Tensor targets = Tensor::from_data({0.f}, {1, 1});
-
-    Tensor loss = cross_entropy_loss(logits, targets);
-
-    EXPECT_GT(loss.at(0, 0), 10.f);
+TEST_F(CrossEntropyOpForwardTest, LossIsAlwaysNonNegative) {
+    auto probs   = make_tensor({3, 2}, {0.8f, 0.2f,  0.5f, 0.5f,  0.1f, 0.9f});
+    auto targets = make_tensor({3, 2}, {1.f,  0.f,   0.f,  1.f,   1.f,  0.f});
+    auto loss    = CrossEntropyOp::forward(probs, targets);
+    EXPECT_GE(loss(0), 0.f);
 }
 
-TEST(CrossEntropyLossForward, BatchedLossIsMean) {
-    // batched loss = mean of per-sample losses
-    // compute each individually and verify mean matches batched
-    // sample 0: logits=[2,1], target=0
-    // sample 1: logits=[1,2], target=1
-    Tensor logits_0 = Tensor::from_data({2.f, 1.f}, {2, 1});
-    Tensor logits_1 = Tensor::from_data({1.f, 2.f}, {2, 1});
-    Tensor targets_0 = Tensor::from_data({0.f}, {1, 1});
-    Tensor targets_1 = Tensor::from_data({1.f}, {1, 1});
-
-    float loss_0 = cross_entropy_loss(logits_0, targets_0).at(0, 0);
-    float loss_1 = cross_entropy_loss(logits_1, targets_1).at(0, 0);
-    float expected_mean = (loss_0 + loss_1) / 2.f;
-
-    // batched version
-    Tensor logits_batch  = Tensor::from_data({2.f, 1.f,
-                                              1.f, 2.f}, {2, 2});
-    Tensor targets_batch = Tensor::from_data({0.f, 1.f}, {1, 2});
-
-    float batched_loss = cross_entropy_loss(logits_batch, targets_batch).at(0, 0);
-
-    EXPECT_NEAR(batched_loss, expected_mean, 1e-5f);
+TEST_F(CrossEntropyOpForwardTest, ShapeMismatchAsserts) {
+    auto probs   = Tensor::zeros(make_shape({2, 3}), 2);
+    auto targets = Tensor::zeros(make_shape({2, 4}), 2);
+    EXPECT_DEATH(CrossEntropyOp::forward(probs, targets), "");
 }
 
-TEST(CrossEntropyLossForward, NumericalStabilityLargeLogits) {
-    // without max subtraction, exp(1000) overflows to inf
-    Tensor logits  = Tensor::from_data({1000.f, 1001.f, 1002.f}, {3, 1});
-    Tensor targets = Tensor::from_data({2.f}, {1, 1});
-
-    Tensor loss = cross_entropy_loss(logits, targets);
-
-    EXPECT_FALSE(std::isnan(loss.at(0, 0)));
-    EXPECT_FALSE(std::isinf(loss.at(0, 0)));
-    EXPECT_GE(loss.at(0, 0), 0.f);
-}
-
-TEST(CrossEntropyLossForward, NumericalStabilityNegativeLogits) {
-    // without max subtraction, exp(-1000) underflows to 0
-    // causing log(0) = -inf
-    Tensor logits  = Tensor::from_data({-1000.f, -1001.f, -1002.f}, {3, 1});
-    Tensor targets = Tensor::from_data({0.f}, {1, 1});
-
-    Tensor loss = cross_entropy_loss(logits, targets);
-
-    EXPECT_FALSE(std::isnan(loss.at(0, 0)));
-    EXPECT_FALSE(std::isinf(loss.at(0, 0)));
-}
-
-// ================================================================
-// backward
-// ================================================================
-
-TEST(CrossEntropyLossBackward, GradientShape) {
-    // gradient must have same shape as logits
-    Tensor logits  = Tensor::from_data({1.f, 2.f, 0.f}, {3, 1}, {}, true);
-    Tensor targets = Tensor::from_data({1.f}, {1, 1});
-
-    Tensor loss = cross_entropy_loss(logits, targets);
-    backward(loss);
-
-    ASSERT_TRUE(logits.has_grad());
-    EXPECT_EQ(logits.grad().shape(0), 3);
-    EXPECT_EQ(logits.grad().shape(1), 1);
-}
-
-TEST(CrossEntropyLossBackward, GradientSumsToZero) {
-    // key property: gradients sum to zero over the class dimension
-    // because softmax outputs sum to 1, and d/d_logits of a constant = 0
-    // (softmax - one_hot) sums to (1 - 1) = 0 per sample
-    Tensor logits  = Tensor::from_data({1.f, 2.f, 3.f}, {3, 1}, {}, true);
-    Tensor targets = Tensor::from_data({0.f}, {1, 1});
-
-    Tensor loss = cross_entropy_loss(logits, targets);
-    backward(loss);
-
-    ASSERT_TRUE(logits.has_grad());
-
-    float sum = 0.f;
-    for (int64_t i = 0; i < 3; i++)
-        sum += logits.grad().at(i, 0);
-
-    EXPECT_NEAR(sum, 0.f, 1e-5f);
-}
-
-TEST(CrossEntropyLossBackward, BatchedGradientSumsToZeroPerSample) {
-    // gradient sum-to-zero must hold independently per sample (column)
-    Tensor logits  = Tensor::from_data({1.f, 2.f, 2.f, 1.f,
-                                        3.f, 1.f, 1.f, 3.f,
-                                        2.f, 3.f, 3.f, 2.f}, {3, 4}, {}, true);
-    Tensor targets = Tensor::from_data({0.f, 1.f, 2.f, 0.f}, {1, 4});
-
-    Tensor loss = cross_entropy_loss(logits, targets);
-    backward(loss);
-
-    ASSERT_TRUE(logits.has_grad());
-
-    for (int64_t n = 0; n < 4; n++) {
-        float col_sum = 0.f;
-        for (int64_t c = 0; c < 3; c++)
-            col_sum += logits.grad().at(c, n);
-        EXPECT_NEAR(col_sum, 0.f, 1e-5f)
-            << "gradient sum for sample " << n << " should be zero";
-    }
-}
-
-TEST(CrossEntropyLossBackward, KnownGradientValues) {
-    // manual calculation:
-    // logits = [1, 0], target = 0
-    // softmax ≈ [0.7311, 0.2689]
-    // gradient = (softmax - one_hot) / N
-    // = ([0.7311, 0.2689] - [1, 0]) / 1
-    // = [-0.2689,  0.2689]
-    Tensor logits  = Tensor::from_data({1.f, 0.f}, {2, 1}, {}, true);
-    Tensor targets = Tensor::from_data({0.f}, {1, 1});
-
-    Tensor loss = cross_entropy_loss(logits, targets);
-    backward(loss);
-
-    ASSERT_TRUE(logits.has_grad());
-
-    // target class gradient is negative (push logit higher)
-    EXPECT_LT(logits.grad().at(0, 0), 0.f);
-
-    // non-target class gradient is positive (push logit lower)
-    EXPECT_GT(logits.grad().at(1, 0), 0.f);
-
-    // known values
-    EXPECT_NEAR(logits.grad().at(0, 0), -0.2689f, 1e-3f);
-    EXPECT_NEAR(logits.grad().at(1, 0),  0.2689f, 1e-3f);
-}
-
-TEST(CrossEntropyLossBackward, PerfectPredictionSmallGradient) {
-    // when logits strongly favour the correct class,
-    // softmax ≈ one_hot, so gradient ≈ 0
-    Tensor logits  = Tensor::from_data({100.f, -100.f}, {2, 1}, {}, true);
-    Tensor targets = Tensor::from_data({0.f}, {1, 1});
-
-    Tensor loss = cross_entropy_loss(logits, targets);
-    backward(loss);
-
-    ASSERT_TRUE(logits.has_grad());
-
-    EXPECT_NEAR(logits.grad().at(0, 0), 0.f, 1e-3f);
-    EXPECT_NEAR(logits.grad().at(1, 0), 0.f, 1e-3f);
-}
-
-TEST(CrossEntropyLossBackward, NoGradWhenRequiresGradFalse) {
-    // no autograd_meta attached when input doesn't require grad
-    Tensor logits  = Tensor::from_data({1.f, 2.f, 3.f}, {3, 1});
-    Tensor targets = Tensor::from_data({1.f}, {1, 1});
-
-    Tensor loss = cross_entropy_loss(logits, targets);
-
+TEST_F(CrossEntropyOpForwardTest, AlwaysProducesNoMeta) {
+    auto probs   = make_tensor({1, 2}, {0.6f, 0.4f}, /*requires_grad=*/true);
+    auto targets = make_tensor({1, 2}, {1.f, 0.f});
+    auto loss    = CrossEntropyOp::forward(probs, targets);
     EXPECT_EQ(loss.autograd_meta, nullptr);
 }
 
-TEST(CrossEntropyLossBackward, GradFlowsThroughLinearLayer) {
-    // verify grad flows through a linear layer into its weights
-    // logits = W @ x, loss = cross_entropy(logits, target)
-    // W should receive a gradient
-    Tensor W = Tensor::from_data(
-        {0.1f, 0.2f, 0.3f, 0.4f,
-         0.5f, 0.6f, 0.7f, 0.8f,
-         0.9f, 1.0f, 1.1f, 1.2f},
-        {3, 4}, {}, true);
+// ─────────────────────────────────────────────
+// CrossEntropyOp::backward — pure gradient
+// ─────────────────────────────────────────────
 
-    Tensor x       = Tensor::from_data({1.f, 0.f, 1.f, 0.f}, {4, 1});
-    Tensor targets = Tensor::from_data({2.f}, {1, 1});
+class CrossEntropyOpBackwardTest : public ::testing::Test {};
 
-    Tensor logits = matmul(W, x);
-    Tensor loss   = cross_entropy_loss(logits, targets);
-    backward(loss);
+TEST_F(CrossEntropyOpBackwardTest, GradShape) {
+    auto probs   = make_tensor({2, 3}, {0.1f, 0.7f, 0.2f, 0.3f, 0.3f, 0.4f});
+    auto targets = make_tensor({2, 3}, {0.f,  1.f,  0.f,  1.f,  0.f,  0.f});
+    auto grad    = make_tensor({1},   {1.f});
+    auto grads   = CrossEntropyOp::backward(grad, probs, targets);
 
-    ASSERT_TRUE(W.has_grad());
-    EXPECT_EQ(W.grad().shape(0), 3);
-    EXPECT_EQ(W.grad().shape(1), 4);
-
-    // W grad should also sum to zero per column (from the sum-to-zero property)
-    // W.grad = d_logits @ x^T, and sum of d_logits = 0
-    // so each column of W.grad sums to 0
-    for (int64_t col = 0; col < 4; col++) {
-        float col_sum = 0.f;
-        for (int64_t row = 0; row < 3; row++)
-            col_sum += W.grad().at(row, col);
-        EXPECT_NEAR(col_sum, 0.f, 1e-5f)
-            << "W gradient column " << col << " should sum to zero";
-    }
+    EXPECT_EQ(grads[0].ndim, 2u);
+    EXPECT_EQ(grads[0].shape_at(0), 2u);
+    EXPECT_EQ(grads[0].shape_at(1), 3u);
 }
 
-TEST(CrossEntropyLossBackward, LossDecreasesAfterGradientStep) {
-    // applying one gradient step should reduce the loss
-    float lr = 0.1f;
+TEST_F(CrossEntropyOpBackwardTest, ZeroTargetGivesZeroGrad) {
+    // Where target is 0, gradient is 0 regardless of prob value.
+    auto probs   = make_tensor({1, 3}, {0.2f, 0.5f, 0.3f});
+    auto targets = make_tensor({1, 3}, {1.f,  0.f,  0.f});
+    auto grad    = make_tensor({1},   {1.f});
+    auto grads   = CrossEntropyOp::backward(grad, probs, targets);
 
-    Tensor logits  = Tensor::from_data({1.f, 2.f, 3.f}, {3, 1}, {}, true);
-    Tensor targets = Tensor::from_data({0.f}, {1, 1});
+    EXPECT_FLOAT_EQ(grads[0](0, 1), 0.f);
+    EXPECT_FLOAT_EQ(grads[0](0, 2), 0.f);
+}
 
-    Tensor loss_before = cross_entropy_loss(logits, targets);
-    float  val_before  = loss_before.at(0, 0);
+TEST_F(CrossEntropyOpBackwardTest, GradNegativeForNonZeroTarget) {
+    // dL/dprobs[i,j] = -targets[i,j] / (probs[i,j] * N) < 0 for targets > 0
+    auto probs   = make_tensor({1, 3}, {0.2f, 0.5f, 0.3f});
+    auto targets = make_tensor({1, 3}, {1.f,  0.f,  0.f});
+    auto grad    = make_tensor({1},   {1.f});
+    auto grads   = CrossEntropyOp::backward(grad, probs, targets);
 
-    backward(loss_before);
-    ASSERT_TRUE(logits.has_grad());
+    EXPECT_LT(grads[0](0, 0), 0.f);
+}
 
-    // manual SGD step
-    for (int64_t i = 0; i < 3; i++)
-        logits.at(i, 0) -= lr * logits.grad().at(i, 0);
+TEST_F(CrossEntropyOpBackwardTest, GradScaledByUpstream) {
+    // Doubling upstream gradient doubles all grad values.
+    auto probs   = make_tensor({1, 2}, {0.6f, 0.4f});
+    auto targets = make_tensor({1, 2}, {1.f,  0.f});
+    auto grad1   = make_tensor({1},   {1.f});
+    auto grad2   = make_tensor({1},   {2.f});
 
-    // clear grad and recompute
-    logits.autograd_meta->grad = nullptr;
+    auto g1 = CrossEntropyOp::backward(grad1, probs, targets);
+    auto g2 = CrossEntropyOp::backward(grad2, probs, targets);
 
-    Tensor loss_after = cross_entropy_loss(logits, targets);
-    float  val_after  = loss_after.at(0, 0);
+    EXPECT_NEAR(g2[0](0, 0), 2.f * g1[0](0, 0), 1e-6f);
+}
 
-    EXPECT_LT(val_after, val_before)
-        << "loss should decrease after one gradient step";
+TEST_F(CrossEntropyOpBackwardTest, NumericalValueCheck) {
+    // N=1, targets=[1,0], probs=[p,1-p] → dL/dp_0 = -1/p, dL/dp_1 = 0
+    float p = 0.7f;
+    auto probs   = make_tensor({1, 2}, {p, 1.f - p});
+    auto targets = make_tensor({1, 2}, {1.f, 0.f});
+    auto grad    = make_tensor({1},   {1.f});
+    auto grads   = CrossEntropyOp::backward(grad, probs, targets);
+
+    float expected = -1.f / p;  // N=1, upstream=1
+    EXPECT_NEAR(grads[0](0, 0), expected, 1e-5f);
+    EXPECT_FLOAT_EQ(grads[0](0, 1), 0.f);
+}
+
+// ─────────────────────────────────────────────
+// cross_entropy() — orchestration + autograd wiring
+// ─────────────────────────────────────────────
+
+class CrossEntropyFuncTest : public ::testing::Test {};
+
+TEST_F(CrossEntropyFuncTest, ProducesCorrectValue) {
+    float p = 1.f / 3.f;
+    auto probs   = make_tensor({1, 3}, {p, p, p});
+    auto targets = make_tensor({1, 3}, {1.f, 0.f, 0.f});
+    auto loss    = cross_entropy(probs, targets);
+    EXPECT_NEAR(loss(0), std::log(3.f), 1e-5f);
+}
+
+TEST_F(CrossEntropyFuncTest, NoRequiresGradProducesNoMeta) {
+    auto probs   = make_tensor({1, 2}, {0.6f, 0.4f});
+    auto targets = make_tensor({1, 2}, {1.f, 0.f});
+    auto loss    = cross_entropy(probs, targets);
+    EXPECT_EQ(loss.autograd_meta, nullptr);
+}
+
+TEST_F(CrossEntropyFuncTest, ProbsRequiresGradProducesMeta) {
+    auto probs   = make_tensor({1, 2}, {0.6f, 0.4f}, /*requires_grad=*/true);
+    auto targets = make_tensor({1, 2}, {1.f, 0.f});
+    auto loss    = cross_entropy(probs, targets);
+    EXPECT_TRUE(loss.requires_grad());
+}
+
+TEST_F(CrossEntropyFuncTest, TargetsRequiresGradGivesNoMeta) {
+    // targets are data — cross_entropy never puts them in the graph.
+    auto probs   = make_tensor({1, 2}, {0.6f, 0.4f});
+    auto targets = make_tensor({1, 2}, {1.f, 0.f}, /*requires_grad=*/true);
+    auto loss    = cross_entropy(probs, targets);
+    EXPECT_EQ(loss.autograd_meta, nullptr);
+}
+
+// ─────────────────────────────────────────────
+// End-to-end autograd via cross_entropy()
+// ─────────────────────────────────────────────
+
+class CrossEntropyAutogradTest : public ::testing::Test {};
+
+TEST_F(CrossEntropyAutogradTest, GradFlowsToProbsOnly) {
+    auto probs   = make_tensor({1, 3}, {0.2f, 0.5f, 0.3f}, /*requires_grad=*/true);
+    auto targets = make_tensor({1, 3}, {1.f,  0.f,  0.f});
+
+    auto loss = cross_entropy(probs, targets);
+    backward(loss);
+
+    ASSERT_TRUE(probs.has_grad());
+}
+
+TEST_F(CrossEntropyAutogradTest, GradNumericalValue) {
+    // N=1, one-hot [1,0,0] → dL/dprobs[0,0] = -1/probs[0,0]
+    float p0 = 0.6f;
+    auto probs   = make_tensor({1, 3}, {p0, 0.3f, 0.1f}, /*requires_grad=*/true);
+    auto targets = make_tensor({1, 3}, {1.f, 0.f,  0.f});
+
+    auto loss = cross_entropy(probs, targets);
+    backward(loss);
+
+    EXPECT_NEAR(probs.grad()(0, 0), -1.f / p0, 1e-5f);
+    EXPECT_FLOAT_EQ(probs.grad()(0, 1), 0.f);
+    EXPECT_FLOAT_EQ(probs.grad()(0, 2), 0.f);
+}
+
+TEST_F(CrossEntropyAutogradTest, GradAveragedOverBatch) {
+    // Same sample repeated N times — per-sample grad should be 1/N times the N=1 case.
+    float p0 = 0.6f;
+    size_t N = 4;
+    std::vector<float> probs_data, tgt_data;
+    for (size_t i = 0; i < N; ++i) { probs_data.push_back(p0); probs_data.push_back(0.4f); }
+    for (size_t i = 0; i < N; ++i) { tgt_data.push_back(1.f);  tgt_data.push_back(0.f); }
+
+    Tensor probs(make_shape({N, 2}), 2, /*requires_grad=*/true);
+    Tensor targets(make_shape({N, 2}), 2);
+    for (size_t row = 0; row < N; ++row) {
+        probs(row, 0)   = probs_data[row * 2];
+        probs(row, 1)   = probs_data[row * 2 + 1];
+        targets(row, 0) = tgt_data[row * 2];
+        targets(row, 1) = tgt_data[row * 2 + 1];
+    }
+
+    auto loss = cross_entropy(probs, targets);
+    backward(loss);
+
+    // dL/dprobs[i,0] = -1/(p0 * N) for all rows
+    float expected = -1.f / (p0 * static_cast<float>(N));
+    for (size_t i = 0; i < N; ++i)
+        EXPECT_NEAR(probs.grad()(i, 0), expected, 1e-5f);
 }

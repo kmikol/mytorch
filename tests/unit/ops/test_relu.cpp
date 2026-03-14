@@ -35,25 +35,25 @@ TEST_F(ReLUOpForwardTest, PositivePassThrough) {
     auto x   = make_tensor({4}, {1.f, 2.f, 3.f, 4.f});
     auto out = ReLUOp::forward(x);
     for (size_t i = 0; i < 4; ++i)
-        EXPECT_FLOAT_EQ(out.storage->data[i], x.storage->data[i]);
+        EXPECT_FLOAT_EQ(out(i), x(i));
 }
 
 TEST_F(ReLUOpForwardTest, NegativeClampedToZero) {
     auto x   = make_tensor({4}, {-1.f, -2.f, -3.f, -4.f});
     auto out = ReLUOp::forward(x);
     for (size_t i = 0; i < 4; ++i)
-        EXPECT_FLOAT_EQ(out.storage->data[i], 0.f);
+        EXPECT_FLOAT_EQ(out(i), 0.f);
 }
 
 TEST_F(ReLUOpForwardTest, MixedSigns) {
     auto x   = make_tensor({6}, {-3.f, -1.f, 0.f, 1.f, 2.f, 5.f});
     auto out = ReLUOp::forward(x);
-    EXPECT_FLOAT_EQ(out.storage->data[0], 0.f);
-    EXPECT_FLOAT_EQ(out.storage->data[1], 0.f);
-    EXPECT_FLOAT_EQ(out.storage->data[2], 0.f);  // exactly zero stays zero
-    EXPECT_FLOAT_EQ(out.storage->data[3], 1.f);
-    EXPECT_FLOAT_EQ(out.storage->data[4], 2.f);
-    EXPECT_FLOAT_EQ(out.storage->data[5], 5.f);
+    EXPECT_FLOAT_EQ(out(0), 0.f);
+    EXPECT_FLOAT_EQ(out(1), 0.f);
+    EXPECT_FLOAT_EQ(out(2), 0.f);  // exactly zero stays zero
+    EXPECT_FLOAT_EQ(out(3), 1.f);
+    EXPECT_FLOAT_EQ(out(4), 2.f);
+    EXPECT_FLOAT_EQ(out(5), 5.f);
 }
 
 TEST_F(ReLUOpForwardTest, OutputShapePreserved) {
@@ -80,7 +80,7 @@ TEST_F(ReLUOpBackwardTest, PositiveInputPassesGrad) {
     auto grad = make_tensor({4}, {5.f, 6.f, 7.f, 8.f});
     auto gx   = ReLUOp::backward(grad, x);
     for (size_t i = 0; i < 4; ++i)
-        EXPECT_FLOAT_EQ(gx.storage->data[i], grad.storage->data[i]);
+        EXPECT_FLOAT_EQ(gx(i), grad(i));
 }
 
 TEST_F(ReLUOpBackwardTest, NegativeInputZerosGrad) {
@@ -88,26 +88,26 @@ TEST_F(ReLUOpBackwardTest, NegativeInputZerosGrad) {
     auto grad = make_tensor({4}, {5.f, 6.f, 7.f, 8.f});
     auto gx   = ReLUOp::backward(grad, x);
     for (size_t i = 0; i < 4; ++i)
-        EXPECT_FLOAT_EQ(gx.storage->data[i], 0.f);
+        EXPECT_FLOAT_EQ(gx(i), 0.f);
 }
 
 TEST_F(ReLUOpBackwardTest, MixedMask) {
     auto x    = make_tensor({4}, {-1.f, 2.f, -3.f, 4.f});
     auto grad = make_tensor({4}, {1.f, 1.f,  1.f, 1.f});
     auto gx   = ReLUOp::backward(grad, x);
-    EXPECT_FLOAT_EQ(gx.storage->data[0], 0.f);
-    EXPECT_FLOAT_EQ(gx.storage->data[1], 1.f);
-    EXPECT_FLOAT_EQ(gx.storage->data[2], 0.f);
-    EXPECT_FLOAT_EQ(gx.storage->data[3], 1.f);
+    EXPECT_FLOAT_EQ(gx(0), 0.f);
+    EXPECT_FLOAT_EQ(gx(1), 1.f);
+    EXPECT_FLOAT_EQ(gx(2), 0.f);
+    EXPECT_FLOAT_EQ(gx(3), 1.f);
 }
 
 TEST_F(ReLUOpBackwardTest, GradScaledByUpstream) {
     auto x    = make_tensor({3}, {1.f, -1.f, 2.f});
     auto grad = make_tensor({3}, {3.f,  5.f, 7.f});
     auto gx   = ReLUOp::backward(grad, x);
-    EXPECT_FLOAT_EQ(gx.storage->data[0], 3.f);   // positive: pass grad
-    EXPECT_FLOAT_EQ(gx.storage->data[1], 0.f);   // negative: zero
-    EXPECT_FLOAT_EQ(gx.storage->data[2], 7.f);   // positive: pass grad
+    EXPECT_FLOAT_EQ(gx(0), 3.f);   // positive: pass grad
+    EXPECT_FLOAT_EQ(gx(1), 0.f);   // negative: zero
+    EXPECT_FLOAT_EQ(gx(2), 7.f);   // positive: pass grad
 }
 
 // ─────────────────────────────────────────────
@@ -119,10 +119,10 @@ class ReLUFuncTest : public ::testing::Test {};
 TEST_F(ReLUFuncTest, ProducesCorrectValues) {
     auto x   = make_tensor({4}, {-2.f, -1.f, 1.f, 2.f});
     auto out = relu(x);
-    EXPECT_FLOAT_EQ(out.storage->data[0], 0.f);
-    EXPECT_FLOAT_EQ(out.storage->data[1], 0.f);
-    EXPECT_FLOAT_EQ(out.storage->data[2], 1.f);
-    EXPECT_FLOAT_EQ(out.storage->data[3], 2.f);
+    EXPECT_FLOAT_EQ(out(0), 0.f);
+    EXPECT_FLOAT_EQ(out(1), 0.f);
+    EXPECT_FLOAT_EQ(out(2), 1.f);
+    EXPECT_FLOAT_EQ(out(3), 2.f);
 }
 
 TEST_F(ReLUFuncTest, NoRequiresGradProducesNoMeta) {
@@ -148,10 +148,10 @@ TEST_F(ReLUAutogradTest, GradMaskedBySign) {
     backward(z);
 
     ASSERT_TRUE(x.has_grad());
-    EXPECT_FLOAT_EQ(x.grad().storage->data[0], 0.f);
-    EXPECT_FLOAT_EQ(x.grad().storage->data[1], 0.f);
-    EXPECT_FLOAT_EQ(x.grad().storage->data[2], 1.f);
-    EXPECT_FLOAT_EQ(x.grad().storage->data[3], 1.f);
+    EXPECT_FLOAT_EQ(x.grad()(0), 0.f);
+    EXPECT_FLOAT_EQ(x.grad()(1), 0.f);
+    EXPECT_FLOAT_EQ(x.grad()(2), 1.f);
+    EXPECT_FLOAT_EQ(x.grad()(3), 1.f);
 }
 
 TEST_F(ReLUAutogradTest, AllNegativeGivesZeroGrad) {
@@ -161,16 +161,16 @@ TEST_F(ReLUAutogradTest, AllNegativeGivesZeroGrad) {
 
     ASSERT_TRUE(x.has_grad());
     for (size_t i = 0; i < 3; ++i)
-        EXPECT_FLOAT_EQ(x.grad().storage->data[i], 0.f);
+        EXPECT_FLOAT_EQ(x.grad()(i), 0.f);
 }
 
 TEST_F(ReLUAutogradTest, ForwardValuesUnchangedByBackward) {
     auto x = make_tensor({3}, {-1.f, 0.f, 2.f}, /*requires_grad=*/true);
     auto z = relu(x);
-    EXPECT_FLOAT_EQ(z.storage->data[0], 0.f);
-    EXPECT_FLOAT_EQ(z.storage->data[1], 0.f);
-    EXPECT_FLOAT_EQ(z.storage->data[2], 2.f);
+    EXPECT_FLOAT_EQ(z(0), 0.f);
+    EXPECT_FLOAT_EQ(z(1), 0.f);
+    EXPECT_FLOAT_EQ(z(2), 2.f);
     backward(z);
-    EXPECT_FLOAT_EQ(z.storage->data[0], 0.f);
-    EXPECT_FLOAT_EQ(z.storage->data[2], 2.f);
+    EXPECT_FLOAT_EQ(z(0), 0.f);
+    EXPECT_FLOAT_EQ(z(2), 2.f);
 }

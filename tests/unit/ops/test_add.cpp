@@ -39,10 +39,10 @@ TEST_F(AddOpForwardTest, ElementWise1D) {
     auto out = AddOp::forward(a, b);
 
     EXPECT_EQ(out.numel, 4u);
-    EXPECT_FLOAT_EQ(out.storage->data[0], 11.f);
-    EXPECT_FLOAT_EQ(out.storage->data[1], 22.f);
-    EXPECT_FLOAT_EQ(out.storage->data[2], 33.f);
-    EXPECT_FLOAT_EQ(out.storage->data[3], 44.f);
+    EXPECT_FLOAT_EQ(out(0), 11.f);
+    EXPECT_FLOAT_EQ(out(1), 22.f);
+    EXPECT_FLOAT_EQ(out(2), 33.f);
+    EXPECT_FLOAT_EQ(out(3), 44.f);
 }
 
 TEST_F(AddOpForwardTest, ElementWise2D) {
@@ -53,8 +53,9 @@ TEST_F(AddOpForwardTest, ElementWise2D) {
 
     EXPECT_EQ(out.shape_at(0), 2u);
     EXPECT_EQ(out.shape_at(1), 3u);
-    for (size_t i = 0; i < 6; ++i)
-        EXPECT_FLOAT_EQ(out.storage->data[i], a.storage->data[i] + b.storage->data[i]);
+    for (size_t row = 0; row < 2; ++row)
+        for (size_t col = 0; col < 3; ++col)
+            EXPECT_FLOAT_EQ(out(row, col), a(row, col) + b(row, col));
 }
 
 TEST_F(AddOpForwardTest, OutputShapeMatchesInput_NoBC) {
@@ -163,8 +164,8 @@ TEST_F(AddOpBackwardTest, NoBroadcast_GradPassesThrough) {
     auto grads = AddOp::backward(grad, a, b);
 
     for (size_t i = 0; i < 3; ++i) {
-        EXPECT_FLOAT_EQ(grads[0].storage->data[i], grad.storage->data[i]);
-        EXPECT_FLOAT_EQ(grads[1].storage->data[i], grad.storage->data[i]);
+        EXPECT_FLOAT_EQ(grads[0](i), grad(i));
+        EXPECT_FLOAT_EQ(grads[1](i), grad(i));
     }
 }
 
@@ -184,8 +185,9 @@ TEST_F(AddOpBackwardTest, BroadcastDim0_GradSummedForA) {
 
     // grad_b shape is [4, 3]; passes through unchanged
     EXPECT_EQ(grads[1].shape_at(0), 4u);
-    for (size_t i = 0; i < 12; ++i)
-        EXPECT_FLOAT_EQ(grads[1].storage->data[i], 1.f);
+    for (size_t row = 0; row < 4; ++row)
+        for (size_t col = 0; col < 3; ++col)
+            EXPECT_FLOAT_EQ(grads[1](row, col), 1.f);
 }
 
 TEST_F(AddOpBackwardTest, BroadcastDim1_GradSummedForB) {
@@ -246,9 +248,9 @@ TEST_F(AddFuncTest, ProducesCorrectValues_NoBC) {
     auto a = make_tensor({3}, {1, 2, 3});
     auto b = make_tensor({3}, {10, 20, 30});
     auto out = add(a, b);
-    EXPECT_FLOAT_EQ(out.storage->data[0], 11.f);
-    EXPECT_FLOAT_EQ(out.storage->data[1], 22.f);
-    EXPECT_FLOAT_EQ(out.storage->data[2], 33.f);
+    EXPECT_FLOAT_EQ(out(0), 11.f);
+    EXPECT_FLOAT_EQ(out(1), 22.f);
+    EXPECT_FLOAT_EQ(out(2), 33.f);
 }
 
 TEST_F(AddFuncTest, ProducesCorrectValues_Broadcast) {
@@ -289,8 +291,8 @@ TEST_F(AddAutogradTest, NoBroadcast_GradIsOne) {
     ASSERT_TRUE(a.has_grad());
     ASSERT_TRUE(b.has_grad());
     for (size_t i = 0; i < 4; ++i) {
-        EXPECT_FLOAT_EQ(a.grad().storage->data[i], 1.f);
-        EXPECT_FLOAT_EQ(b.grad().storage->data[i], 1.f);
+        EXPECT_FLOAT_EQ(a.grad()(i), 1.f);
+        EXPECT_FLOAT_EQ(b.grad()(i), 1.f);
     }
 }
 
@@ -308,8 +310,9 @@ TEST_F(AddAutogradTest, BroadcastDim0_GradSummedForA) {
         EXPECT_FLOAT_EQ(a.grad()(0, j), 4.f);
 
     ASSERT_TRUE(b.has_grad());
-    for (size_t i = 0; i < 12; ++i)
-        EXPECT_FLOAT_EQ(b.grad().storage->data[i], 1.f);
+    for (size_t row = 0; row < 4; ++row)
+        for (size_t col = 0; col < 3; ++col)
+            EXPECT_FLOAT_EQ(b.grad()(row, col), 1.f);
 }
 
 TEST_F(AddAutogradTest, OnlyARequiresGrad) {
@@ -321,7 +324,7 @@ TEST_F(AddAutogradTest, OnlyARequiresGrad) {
 
     ASSERT_TRUE(a.has_grad());
     for (size_t i = 0; i < 4; ++i)
-        EXPECT_FLOAT_EQ(a.grad().storage->data[i], 1.f);
+        EXPECT_FLOAT_EQ(a.grad()(i), 1.f);
 
     EXPECT_FALSE(b.has_grad());
 }
@@ -340,7 +343,7 @@ TEST_F(AddAutogradTest, ChainWithMul) {
     ASSERT_TRUE(a.has_grad());
     ASSERT_TRUE(b.has_grad());
     for (size_t i = 0; i < 3; ++i) {
-        EXPECT_FLOAT_EQ(a.grad().storage->data[i], c.storage->data[i]);
-        EXPECT_FLOAT_EQ(b.grad().storage->data[i], c.storage->data[i]);
+        EXPECT_FLOAT_EQ(a.grad()(i), c(i));
+        EXPECT_FLOAT_EQ(b.grad()(i), c(i));
     }
 }

@@ -117,8 +117,9 @@ TEST_F(MatMulOpForwardTest, MultiplyByZero) {
     auto A = make_tensor({1,2,3,4,5,6}, {2,3});
     auto Z = Tensor::zeros(make_shape({3,2}), 2);
     auto R = MatMulOp::forward(A, Z);
-    for (size_t i = 0; i < R.numel; ++i)
-        EXPECT_FLOAT_EQ(R.storage->data[i], 0.f);
+    for (size_t row = 0; row < 2; ++row)
+        for (size_t col = 0; col < 2; ++col)
+            EXPECT_FLOAT_EQ(R(row, col), 0.f);
 }
 
 TEST_F(MatMulOpForwardTest, ColumnVectorProduct) {

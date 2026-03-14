@@ -37,34 +37,34 @@ class SigmoidOpForwardTest : public ::testing::Test {};
 TEST_F(SigmoidOpForwardTest, ZeroGivesHalf) {
     auto x   = make_tensor({1}, {0.f});
     auto out = SigmoidOp::forward(x);
-    EXPECT_FLOAT_EQ(out.storage->data[0], 0.5f);
+    EXPECT_FLOAT_EQ(out(0), 0.5f);
 }
 
 TEST_F(SigmoidOpForwardTest, LargePositiveApproachesOne) {
     auto x   = make_tensor({1}, {100.f});
     auto out = SigmoidOp::forward(x);
-    EXPECT_NEAR(out.storage->data[0], 1.f, 1e-5f);
+    EXPECT_NEAR(out(0), 1.f, 1e-5f);
 }
 
 TEST_F(SigmoidOpForwardTest, LargeNegativeApproachesZero) {
     auto x   = make_tensor({1}, {-100.f});
     auto out = SigmoidOp::forward(x);
-    EXPECT_NEAR(out.storage->data[0], 0.f, 1e-5f);
+    EXPECT_NEAR(out(0), 0.f, 1e-5f);
 }
 
 TEST_F(SigmoidOpForwardTest, ValuesMatchFormula) {
     auto x   = make_tensor({5}, {-2.f, -1.f, 0.f, 1.f, 2.f});
     auto out = SigmoidOp::forward(x);
     for (size_t i = 0; i < 5; ++i)
-        EXPECT_NEAR(out.storage->data[i], ref_sigmoid(x.storage->data[i]), 1e-6f);
+        EXPECT_NEAR(out(i), ref_sigmoid(x(i)), 1e-6f);
 }
 
 TEST_F(SigmoidOpForwardTest, OutputInOpenUnitInterval) {
     auto x   = make_tensor({4}, {-10.f, -1.f, 1.f, 10.f});
     auto out = SigmoidOp::forward(x);
     for (size_t i = 0; i < 4; ++i) {
-        EXPECT_GT(out.storage->data[i], 0.f);
-        EXPECT_LT(out.storage->data[i], 1.f);
+        EXPECT_GT(out(i), 0.f);
+        EXPECT_LT(out(i), 1.f);
     }
 }
 
@@ -95,9 +95,9 @@ TEST_F(SigmoidOpBackwardTest, UnitGradGivesDerivative) {
     auto gx   = SigmoidOp::backward(grad, out);
 
     for (size_t i = 0; i < 4; ++i) {
-        float o   = out.storage->data[i];
+        float o   = out(i);
         float ref = o * (1.f - o);
-        EXPECT_NEAR(gx.storage->data[i], ref, 1e-6f);
+        EXPECT_NEAR(gx(i), ref, 1e-6f);
     }
 }
 
@@ -106,7 +106,7 @@ TEST_F(SigmoidOpBackwardTest, MaxDerivativeAtZero) {
     auto out  = make_tensor({1}, {0.5f});  // σ(0) = 0.5
     auto grad = Tensor::ones(make_shape({1}), 1);
     auto gx   = SigmoidOp::backward(grad, out);
-    EXPECT_NEAR(gx.storage->data[0], 0.25f, 1e-6f);
+    EXPECT_NEAR(gx(0), 0.25f, 1e-6f);
 }
 
 TEST_F(SigmoidOpBackwardTest, DerivativeNearZeroForExtreme) {
@@ -115,8 +115,8 @@ TEST_F(SigmoidOpBackwardTest, DerivativeNearZeroForExtreme) {
     auto out  = SigmoidOp::forward(x);
     auto grad = Tensor::ones(make_shape({2}), 1);
     auto gx   = SigmoidOp::backward(grad, out);
-    EXPECT_NEAR(gx.storage->data[0], 0.f, 1e-4f);
-    EXPECT_NEAR(gx.storage->data[1], 0.f, 1e-4f);
+    EXPECT_NEAR(gx(0), 0.f, 1e-4f);
+    EXPECT_NEAR(gx(1), 0.f, 1e-4f);
 }
 
 TEST_F(SigmoidOpBackwardTest, UpstreamGradScales) {
@@ -124,7 +124,7 @@ TEST_F(SigmoidOpBackwardTest, UpstreamGradScales) {
     auto grad = make_tensor({1}, {4.f});
     auto gx   = SigmoidOp::backward(grad, out);
     // dL/dx = 4 * 0.5 * 0.5 = 1.0
-    EXPECT_NEAR(gx.storage->data[0], 1.f, 1e-6f);
+    EXPECT_NEAR(gx(0), 1.f, 1e-6f);
 }
 
 // ─────────────────────────────────────────────
@@ -137,7 +137,7 @@ TEST_F(SigmoidFuncTest, ProducesCorrectValues) {
     auto x   = make_tensor({3}, {-1.f, 0.f, 1.f});
     auto out = sigmoid(x);
     for (size_t i = 0; i < 3; ++i)
-        EXPECT_NEAR(out.storage->data[i], ref_sigmoid(x.storage->data[i]), 1e-6f);
+        EXPECT_NEAR(out(i), ref_sigmoid(x(i)), 1e-6f);
 }
 
 TEST_F(SigmoidFuncTest, NoRequiresGradProducesNoMeta) {
@@ -164,18 +164,18 @@ TEST_F(SigmoidAutogradTest, GradMatchesDerivative) {
 
     ASSERT_TRUE(x.has_grad());
     for (size_t i = 0; i < 4; ++i) {
-        float xi  = x.storage->data[i];
+        float xi  = x(i);
         float sig = ref_sigmoid(xi);
-        EXPECT_NEAR(x.grad().storage->data[i], sig * (1.f - sig), 1e-6f);
+        EXPECT_NEAR(x.grad()(i), sig * (1.f - sig), 1e-6f);
     }
 }
 
 TEST_F(SigmoidAutogradTest, ForwardValuesUnchangedByBackward) {
     auto x = make_tensor({3}, {-1.f, 0.f, 1.f}, /*requires_grad=*/true);
     auto z = sigmoid(x);
-    float v0 = z.storage->data[0];
-    float v2 = z.storage->data[2];
+    float v0 = z(0);
+    float v2 = z(2);
     backward(z);
-    EXPECT_FLOAT_EQ(z.storage->data[0], v0);
-    EXPECT_FLOAT_EQ(z.storage->data[2], v2);
+    EXPECT_FLOAT_EQ(z(0), v0);
+    EXPECT_FLOAT_EQ(z(2), v2);
 }
