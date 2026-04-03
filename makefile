@@ -29,7 +29,7 @@ help:
 	@echo "  Benchmarks"
 	@echo "    make bench      op=<op> mode=<forward|backward>"
 	@echo "                    [size=512] [iters=100] [warmup=10]"
-	@echo "    make bench_mnist [batches=200] [batch_size=64]"
+	@echo "    make bench_mnist [batches=200] [batch_size=64] [bench_model=mlp|cnn]"
 	@echo ""
 	@echo "  Profiling (gprof)"
 	@echo "    make profile_gprof     [profile_epochs=3]"
@@ -183,7 +183,7 @@ profile_gprof_top: $(BUILD_OPT)/profile_main_gprof
 # benchmarks
 #
 #   make bench op=matmul mode=forward [size=512] [iters=100] [warmup=10]
-#   make bench_mnist [batches=200] [batch_size=64]
+#   make bench_mnist [batches=200] [batch_size=64] [bench_model=mlp|cnn]
 # ──────────────────────────────────────────────────────────────
 
 op     ?= matmul
@@ -193,6 +193,7 @@ warmup ?= 10
 
 batches    ?= 200
 batch_size ?= 64
+bench_model ?= mlp
 
 $(BUILD_OPT)/bench_ops: $(BUILD_OPT)/build.ninja $(SOURCES) $(HEADERS) tests/profiling/bench_ops.cpp
 	cmake --build $(BUILD_OPT) --target bench_ops
@@ -205,7 +206,7 @@ bench: $(BUILD_OPT)/bench_ops
 	./$(BUILD_OPT)/bench_ops --op $(op) --mode $(mode) --size $(size) --iters $(iters) --warmup $(warmup)
 
 bench_mnist: $(BUILD_OPT)/bench_mnist
-	N_BATCHES=$(batches) BATCH_SIZE=$(batch_size) ./$(BUILD_OPT)/bench_mnist
+	N_BATCHES=$(batches) BATCH_SIZE=$(batch_size) MODEL=$(bench_model) ./$(BUILD_OPT)/bench_mnist
 
 
 # ──────────────────────────────────────────────────────────────

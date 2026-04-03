@@ -27,12 +27,33 @@ public:
                 continue;
 
             Tensor& g = *p->autograd_meta->grad;
-            assert(p->ndim == 2 && g.ndim == 2);
-            assert(p->shape[0] == g.shape[0] && p->shape[1] == g.shape[1]);
+            assert(p->ndim == g.ndim);
+            for (size_t d = 0; d < p->ndim; ++d)
+                assert(p->shape[d] == g.shape[d]);
 
-            for (size_t i = 0; i < p->shape[0]; ++i)
-                for (size_t j = 0; j < p->shape[1]; ++j)
-                    (*p)(i, j) -= learning_rate * g(i, j);
+            if (p->is_contiguous() && g.is_contiguous()) {
+                float* dst = p->storage->data + p->offset;
+                const float* src = g.storage->data + g.offset;
+                for (size_t i = 0; i < p->numel; ++i)
+                    dst[i] -= learning_rate * src[i];
+                continue;
+            }
+
+            const Strides cs = Tensor::strides_from_shape(p->shape, p->ndim);
+            for (size_t flat = 0; flat < p->numel; ++flat) {
+                size_t p_idx = p->offset;
+                size_t g_idx = g.offset;
+                size_t rem = flat;
+
+                for (size_t d = 0; d < p->ndim; ++d) {
+                    const size_t dim_idx = rem / cs[d];
+                    rem %= cs[d];
+                    p_idx += dim_idx * p->strides[d];
+                    g_idx += dim_idx * g.strides[d];
+                }
+
+                p->storage->data[p_idx] -= learning_rate * g.storage->data[g_idx];
+            }
         }
     }
 

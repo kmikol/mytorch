@@ -133,7 +133,7 @@ add_custom_target(run_bench_mnist
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 
-foreach(OP matmul mul add relu sigmoid cross_entropy linear)
+foreach(OP matmul mul add relu sigmoid cross_entropy linear conv2d im2col reshape)
     foreach(MODE forward backward)
         add_custom_target(bench_${OP}_${MODE}
             COMMAND $<TARGET_FILE:bench_ops>

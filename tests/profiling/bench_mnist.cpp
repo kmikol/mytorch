@@ -6,8 +6,9 @@
 //   N_BATCHES   number of batches to run   (default: 200)
 //   BATCH_SIZE  samples per batch          (default: 64)
 //   LR          SGD learning rate          (default: 0.1)
+//   MODEL       mlp or cnn                 (default: mlp)
 //
-//   ./build/bench_mnist [n_batches] [batch_size]
+//   ./build/bench_mnist [n_batches] [batch_size] [--model mlp|cnn]
 //
 // Profiler usage:
 //   cmake --build build --target bench_mnist
@@ -27,9 +28,11 @@
 #include "autograd.h"
 #include "dataset/dataloader.h"
 #include "dataset/mnist_dataset.h"
-#include "layers/linear.h"
 #include "loss_functions/cross_entropy.h"
+#include "networks/cnn.h"
+#include "networks/mlp.h"
 #include "ops/activations/relu.h"
+#include "ops/reshape.h"
 #include "optim/sgd.h"
 
 // ─────────────────────────────────────────────
@@ -46,12 +49,42 @@ static float env_float(const char* key, float fallback) {
     return v ? static_cast<float>(std::atof(v)) : fallback;
 }
 
+static std::string env_str(const char* key, const std::string& fallback) {
+    const char* v = std::getenv(key);
+    return v ? std::string(v) : fallback;
+}
+
 static std::string resolve_mnist(const std::string& rel) {
     for (const std::string& base : {"", "../", "/workspace/"}) {
         std::string p = base + rel;
         if (std::filesystem::exists(p)) return p;
     }
     return rel;
+}
+
+static Shape make_shape_4d(size_t d0, size_t d1, size_t d2, size_t d3) {
+    Shape s{};
+    s[0] = d0;
+    s[1] = d1;
+    s[2] = d2;
+    s[3] = d3;
+    return s;
+}
+
+static std::string parse_model_arg(int argc, char* argv[], const std::string& fallback) {
+    std::string model = fallback;
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "--model" && i + 1 < argc) {
+            model = argv[++i];
+            continue;
+        }
+        if (arg.rfind("--model=", 0) == 0) {
+            model = arg.substr(8);
+            continue;
+        }
+    }
+    return model;
 }
 
 // ─────────────────────────────────────────────
@@ -62,9 +95,16 @@ int main(int argc, char* argv[]) {
     int   n_batches  = env_int  ("N_BATCHES",  200);
     int   batch_size = env_int  ("BATCH_SIZE",  64);
     float lr         = env_float("LR",          0.1f);
+    std::string model_name = env_str("MODEL", "mlp");
 
     if (argc >= 2) n_batches  = std::atoi(argv[1]);
     if (argc >= 3) batch_size = std::atoi(argv[2]);
+    model_name = parse_model_arg(argc, argv, model_name);
+
+    if (model_name != "mlp" && model_name != "cnn") {
+        std::fprintf(stderr, "ERROR: --model must be 'mlp' or 'cnn' (got '%s')\n", model_name.c_str());
+        return 1;
+    }
 
     const std::string img_path =
         resolve_mnist("data/MNIST/train-images-idx3-ubyte");
@@ -85,6 +125,7 @@ int main(int argc, char* argv[]) {
     std::printf("  n_batches   : %d\n", n_batches);
     std::printf("  batch_size  : %d\n", batch_size);
     std::printf("  lr          : %.4f\n\n", lr);
+    std::printf("  model       : %s\n\n", model_name.c_str());
 
     MNISTDataset dataset(img_path, lbl_path);
     DataLoader   loader(dataset, static_cast<size_t>(batch_size),
@@ -94,15 +135,28 @@ int main(int argc, char* argv[]) {
     auto [probe_x, probe_y]      = loader.next_batch();
     const size_t input_features  = probe_x.shape_at(1);
     const size_t num_classes     = probe_y.shape_at(1);
+    const size_t image_rows      = dataset.image_rows();
+    const size_t image_cols      = dataset.image_cols();
     loader.reset();
 
-    Linear l1(input_features, 128);
-    Linear l2(128, 64);
-    Linear l3(64, num_classes);
+    MLP mlp_model(input_features, {128, 64}, relu, num_classes);
+    CNN cnn_model(
+        /*input_channels=*/1,
+        image_rows,
+        image_cols,
+        /*conv_out_channels=*/8,
+        /*kernel_h=*/3,
+        /*kernel_w=*/3,
+        relu,
+        num_classes,
+        /*stride_h=*/1,
+        /*stride_w=*/1,
+        /*padding_h=*/1,
+        /*padding_w=*/1
+    );
 
-    std::vector<Tensor*> params = l1.parameters();
-    for (Tensor* p : l2.parameters()) params.push_back(p);
-    for (Tensor* p : l3.parameters()) params.push_back(p);
+    std::vector<Tensor*> params =
+        (model_name == "cnn") ? cnn_model.parameters() : mlp_model.parameters();
     SGD optim(params, lr);
 
     // ── warm-up (excluded from timing) ───────────────────────
@@ -110,9 +164,14 @@ int main(int argc, char* argv[]) {
     std::fflush(stdout);
     {
         auto [x, y] = loader.next_batch();
-        Tensor h1     = relu(l1.forward(x));
-        Tensor h2     = relu(l2.forward(h1));
-        Tensor logits = l3.forward(h2);
+        Tensor logits = Tensor::zeros(probe_y.shape, probe_y.ndim);
+        if (model_name == "cnn") {
+            const size_t b = x.shape_at(0);
+            Tensor x_nchw = reshape(x, make_shape_4d(b, 1, image_rows, image_cols), 4);
+            logits = cnn_model.forward(x_nchw);
+        } else {
+            logits = mlp_model.forward(x);
+        }
         Tensor loss   = cross_entropy(logits, y);
         backward(loss);
         optim.step();
@@ -137,9 +196,14 @@ int main(int argc, char* argv[]) {
         if (!loader.has_next()) { loader.reset(); ++resets; }
 
         auto [x, y]   = loader.next_batch();
-        Tensor h1     = relu(l1.forward(x));
-        Tensor h2     = relu(l2.forward(h1));
-        Tensor logits = l3.forward(h2);
+        Tensor logits = Tensor::zeros(probe_y.shape, probe_y.ndim);
+        if (model_name == "cnn") {
+            const size_t b = x.shape_at(0);
+            Tensor x_nchw = reshape(x, make_shape_4d(b, 1, image_rows, image_cols), 4);
+            logits = cnn_model.forward(x_nchw);
+        } else {
+            logits = mlp_model.forward(x);
+        }
         Tensor loss   = cross_entropy(logits, y);
 
         total_loss += loss(0);

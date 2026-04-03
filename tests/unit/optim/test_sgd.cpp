@@ -114,3 +114,18 @@ TEST_F(SGDTest, StepAndZeroGradWorkWithRealBackwardGradients) {
     opt.zero_grad();
     EXPECT_FALSE(w.has_grad());
 }
+
+TEST_F(SGDTest, StepUpdatesFourDimensionalParameters) {
+    Tensor w4 = Tensor::ones(make_shape({2, 1, 2, 2}), 4, /*requires_grad=*/true);
+    Tensor g4 = Tensor::ones(make_shape({2, 1, 2, 2}), 4);
+    w4.autograd_meta->grad = std::make_shared<Tensor>(g4);
+
+    SGD opt({&w4}, /*learning_rate=*/0.25f);
+    opt.step();
+
+    for (size_t oc = 0; oc < 2; ++oc)
+        for (size_t ic = 0; ic < 1; ++ic)
+            for (size_t kh = 0; kh < 2; ++kh)
+                for (size_t kw = 0; kw < 2; ++kw)
+                    EXPECT_FLOAT_EQ(w4(oc, ic, kh, kw), 0.75f);
+}

@@ -5,7 +5,7 @@
 // Usage:
 //   bench_ops --op <name> --mode <forward|backward> [--size N] [--iters N] [--warmup N]
 //
-// Ops:   matmul  mul  add  relu  sigmoid  cross_entropy  linear
+// Ops:   matmul  mul  add  relu  sigmoid  cross_entropy  linear  conv2d  im2col  reshape
 // Modes: forward  backward
 //
 // --size N   primary dimension (default 512).
@@ -14,6 +14,9 @@
 //            relu/sigmoid: [N×N] element-wise
 //            cross_entropy: [N×10] batch, 10 classes
 //            linear      : [N×784] input, Linear(784,256)
+//            conv2d      : batch N, [N×1×28×28], kernel [8×1×3×3]
+//            im2col      : batch N, [N×1×28×28], kernel 3×3 pad=1
+//            reshape     : view [N×784] ↔ [N×1×28×28]
 //
 // Examples (via cmake convenience targets):
 //   cmake --build build --target bench_matmul_forward
@@ -42,8 +45,11 @@
 #include "ops/activations/relu.h"
 #include "ops/activations/sigmoid.h"
 #include "ops/add.h"
+#include "ops/conv2d.h"
+#include "ops/im2col.h"
 #include "ops/matmul.h"
 #include "ops/mul.h"
+#include "ops/reshape.h"
 
 // ─────────────────────────────────────────────
 // Timing
@@ -345,6 +351,105 @@ static void bench_linear(const std::string& mode, size_t N,
     std::printf("  ─────────────────────────────\n");
 }
 
+static void bench_conv2d(const std::string& mode, size_t N,
+                         size_t iters, size_t warmup) {
+    constexpr size_t C_IN = 1;
+    constexpr size_t C_OUT = 8;
+    constexpr size_t H = 28;
+    constexpr size_t W = 28;
+    constexpr size_t KH = 3;
+    constexpr size_t KW = 3;
+    constexpr size_t STRIDE = 1;
+    constexpr size_t PAD = 1;
+
+    auto x = rand_tensor({N, C_IN, H, W});
+    auto w = rand_tensor({C_OUT, C_IN, KH, KW});
+    auto b = rand_tensor({1, C_OUT});
+    auto g = rand_tensor({N, C_OUT, H, W});
+
+    print_header("conv2d", mode.c_str(), N, iters, warmup);
+    std::printf("  Shape       : [%zu×%zu×%zu×%zu], W=[%zu×%zu×%zu×%zu]\n",
+                N, C_IN, H, W, C_OUT, C_IN, KH, KW);
+
+    BenchResult r;
+    if (mode == "forward") {
+        r = run_bench(iters, warmup, [&] {
+            Conv2dOp::forward(x, w, b, STRIDE, STRIDE, PAD, PAD);
+        });
+    } else {
+        r = run_bench(iters, warmup, [&] {
+            Conv2dOp::backward(g, x, w, b, STRIDE, STRIDE, PAD, PAD);
+        });
+    }
+
+    print_result(r);
+    std::printf("  ─────────────────────────────\n");
+}
+
+static void bench_im2col(const std::string& mode, size_t N,
+                         size_t iters, size_t warmup) {
+    constexpr size_t C = 1;
+    constexpr size_t H = 28;
+    constexpr size_t W = 28;
+    constexpr size_t KH = 3;
+    constexpr size_t KW = 3;
+    constexpr size_t STRIDE = 1;
+    constexpr size_t PAD = 1;
+
+    auto x = rand_tensor({N, C, H, W});
+
+    print_header("im2col", mode.c_str(), N, iters, warmup);
+    std::printf("  Shape       : [%zu×%zu×%zu×%zu], k=%zux%zu pad=%zu\n",
+                N, C, H, W, KH, KW, PAD);
+
+    if (mode == "backward") {
+        std::printf("  Note        : im2col backward is not implemented separately; using forward extraction timing.\n");
+    }
+
+    BenchResult r = run_bench(iters, warmup, [&] {
+        Im2ColOp::forward(x, KH, KW, STRIDE, STRIDE, PAD, PAD);
+    });
+
+    print_result(r);
+    std::printf("  ─────────────────────────────\n");
+}
+
+static void bench_reshape(const std::string& mode, size_t N,
+                          size_t iters, size_t warmup) {
+    auto x = rand_tensor({N, static_cast<size_t>(784)}, /*requires_grad=*/true);
+
+    Shape s4{};
+    s4[0] = N;
+    s4[1] = 1;
+    s4[2] = 28;
+    s4[3] = 28;
+
+    Shape s2{};
+    s2[0] = N;
+    s2[1] = 784;
+
+    print_header("reshape", mode.c_str(), N, iters, warmup);
+    std::printf("  Shape       : [%zu×784] ↔ [%zux1x28x28]\n", N, N);
+
+    BenchResult r;
+    if (mode == "forward") {
+        r = run_bench(iters, warmup, [&] {
+            reshape(x, s4, 4);
+        });
+    } else {
+        r = run_bench(iters, warmup, [&] {
+            Tensor y = reshape(x, s4, 4);
+            Tensor z = reshape(y, s2, 2);
+            backward(z);
+            x.autograd_meta = std::make_shared<AutogradMeta>();
+            x.autograd_meta->requires_grad = true;
+        });
+    }
+
+    print_result(r);
+    std::printf("  ─────────────────────────────\n");
+}
+
 // ─────────────────────────────────────────────
 // Argument parsing
 // ─────────────────────────────────────────────
@@ -353,7 +458,7 @@ static void print_usage(const char* prog) {
     std::printf(
         "Usage: %s --op <name> --mode <forward|backward>"
         " [--size N] [--iters N] [--warmup N]\n\n"
-        "Ops:   matmul  mul  add  relu  sigmoid  cross_entropy  linear\n"
+        "Ops:   matmul  mul  add  relu  sigmoid  cross_entropy  linear  conv2d  im2col  reshape\n"
         "Modes: forward  backward\n\n"
         "Defaults: --size 512 --iters 100 --warmup 10\n",
         prog);
@@ -393,10 +498,13 @@ int main(int argc, char* argv[]) {
     else if (op == "sigmoid")       bench_sigmoid      (mode, size, iters, warmup);
     else if (op == "cross_entropy") bench_cross_entropy(mode, size, iters, warmup);
     else if (op == "linear")        bench_linear       (mode, size, iters, warmup);
+    else if (op == "conv2d")        bench_conv2d       (mode, size, iters, warmup);
+    else if (op == "im2col")        bench_im2col       (mode, size, iters, warmup);
+    else if (op == "reshape")       bench_reshape      (mode, size, iters, warmup);
     else {
         std::fprintf(stderr,
             "ERROR: unknown op '%s'.\n"
-            "       Valid ops: matmul mul add relu sigmoid cross_entropy linear\n",
+            "       Valid ops: matmul mul add relu sigmoid cross_entropy linear conv2d im2col reshape\n",
             op.c_str());
         return 1;
     }

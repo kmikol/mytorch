@@ -9,9 +9,10 @@
 #include "autograd.h"
 #include "dataset/dataloader.h"
 #include "dataset/mnist_dataset.h"
-#include "networks/mlp.h"
 #include "loss_functions/cross_entropy.h"
+#include "networks/cnn.h"
 #include "ops/activations/relu.h"
+#include "ops/reshape.h"
 #include "optim/sgd.h"
 #include "utils/metrics.h"
 
@@ -45,12 +46,21 @@ size_t argmax_row(const Tensor& x, size_t row) {
     return best_idx;
 }
 
+Shape make_shape_4d(size_t d0, size_t d1, size_t d2, size_t d3) {
+    Shape s{};
+    s[0] = d0;
+    s[1] = d1;
+    s[2] = d2;
+    s[3] = d3;
+    return s;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     const int epochs = (argc > 1) ? std::max(1, std::atoi(argv[1])) : 5;
     const size_t batch_size = 64;
-    const float learning_rate = 0.1f;
+    const float learning_rate = 0.03f;
 
     const std::string image_path = resolve_data_path("data/MNIST/train-images-idx3-ubyte");
     const std::string label_path = resolve_data_path("data/MNIST/train-labels-idx1-ubyte");
@@ -72,9 +82,28 @@ int main(int argc, char** argv) {
     auto [probe_inputs, probe_targets] = loader.next_batch();
     const size_t input_features = probe_inputs.shape_at(1);
     const size_t num_classes = probe_targets.shape_at(1);
+    const size_t image_rows = dataset.image_rows();
+    const size_t image_cols = dataset.image_cols();
 
-    const std::vector<size_t> hidden_features = {128, 64};
-    MLP model(input_features, hidden_features, relu, num_classes);
+    if (input_features != image_rows * image_cols) {
+        std::cerr << "Unexpected MNIST shape mismatch.\n";
+        return 1;
+    }
+
+    CNN model(
+        /*input_channels=*/1,
+        image_rows,
+        image_cols,
+        /*conv_out_channels=*/8,
+        /*kernel_h=*/3,
+        /*kernel_w=*/3,
+        relu,
+        num_classes,
+        /*stride_h=*/1,
+        /*stride_w=*/1,
+        /*padding_h=*/1,
+        /*padding_w=*/1
+    );
 
     std::vector<Tensor*> params = model.parameters();
     SGD optim(params, learning_rate);
@@ -83,6 +112,7 @@ int main(int argc, char** argv) {
               << " | samples=" << dataset.size()
               << " | input_features=" << input_features
               << " | classes=" << num_classes
+              << " | model=cnn"
               << " | epochs=" << epochs
               << "\n";
 
@@ -99,7 +129,9 @@ int main(int argc, char** argv) {
         while (loader.has_next()) {
             auto [inputs, targets] = loader.next_batch();
 
-            Tensor logits = model.forward(inputs);
+            const size_t batch = inputs.shape_at(0);
+            Tensor image_batch = reshape(inputs, make_shape_4d(batch, 1, image_rows, image_cols), 4);
+            Tensor logits = model.forward(image_batch);
 
             Tensor loss = cross_entropy(logits, targets);
             epoch_loss_sum += loss(0);
