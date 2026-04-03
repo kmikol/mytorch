@@ -4,97 +4,91 @@ project(myml CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Default to Debug when no build type is explicitly provided.
-if (NOT CMAKE_BUILD_TYPE)
-     set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
 endif()
 
 
 # ──────────────────────────────────────────────────────────────
-# sources
+# Sources
 # ──────────────────────────────────────────────────────────────
 
-file(GLOB_RECURSE LIB_SOURCES CONFIGURE_DEPENDS "src/*.cpp")
+file(GLOB_RECURSE LIB_SOURCES      CONFIGURE_DEPENDS "src/*.cpp")
+file(GLOB_RECURSE UNIT_TEST_SOURCES    CONFIGURE_DEPENDS "tests/unit/*.cpp")
+file(GLOB_RECURSE SMOKE_TEST_SOURCES   CONFIGURE_DEPENDS "tests/smoke/*.cpp")
+file(GLOB_RECURSE DATASET_TEST_SOURCES CONFIGURE_DEPENDS "tests/datasets/*.cpp")
 
-file(GLOB_RECURSE UNIT_TEST_SOURCES
-     CONFIGURE_DEPENDS
-     "tests/unit/*.cpp")
-
-file(GLOB_RECURSE SMOKE_TEST_SOURCES
-     CONFIGURE_DEPENDS
-     "tests/smoke/*.cpp")
-
-file(GLOB_RECURSE DATASET_TEST_SOURCES
-     CONFIGURE_DEPENDS
-     "tests/datasets/*.cpp")
 
 # ──────────────────────────────────────────────────────────────
-# libraries
+# Dependencies
+# ──────────────────────────────────────────────────────────────
+
+find_package(GTest REQUIRED)
+find_package(OpenMP REQUIRED)
+find_package(BLAS)          # optional — enables BLAS reference in bench_ops
+
+
+# ──────────────────────────────────────────────────────────────
+# Core library (two variants: normal and coverage-instrumented)
 # ──────────────────────────────────────────────────────────────
 
 add_library(myml_lib ${LIB_SOURCES})
 target_include_directories(myml_lib PUBLIC src)
+target_link_libraries(myml_lib PUBLIC OpenMP::OpenMP_CXX)
 
 add_library(myml_lib_cov ${LIB_SOURCES})
 target_include_directories(myml_lib_cov PUBLIC src)
-target_compile_options(myml_lib_cov PRIVATE --coverage -O3 -fno-inline)
+target_compile_options(myml_lib_cov PRIVATE --coverage -O0 -fno-inline)
 target_link_options(myml_lib_cov    PRIVATE --coverage)
-
-find_package(GTest REQUIRED)
-find_package(OpenMP REQUIRED)
-find_package(BLAS)  # optional — enables BLAS reference in bench_ops when present
-
-target_link_libraries(myml_lib      PUBLIC OpenMP::OpenMP_CXX)
 target_link_libraries(myml_lib_cov  PUBLIC OpenMP::OpenMP_CXX)
 
+
 # ──────────────────────────────────────────────────────────────
-# unit test binaries
+# Test binaries
 # ──────────────────────────────────────────────────────────────
 
-add_executable(unit_tests ${UNIT_TEST_SOURCES})
-target_link_libraries(unit_tests PRIVATE myml_lib GTest::gtest_main)
+add_executable(unit_tests    ${UNIT_TEST_SOURCES})
+add_executable(smoke_tests   ${SMOKE_TEST_SOURCES})
+add_executable(dataset_tests ${DATASET_TEST_SOURCES})
 
+target_link_libraries(unit_tests    PRIVATE myml_lib GTest::gtest_main)
+target_link_libraries(smoke_tests   PRIVATE myml_lib GTest::gtest_main)
+target_link_libraries(dataset_tests PRIVATE myml_lib GTest::gtest_main)
+
+# Coverage variant (unit tests only — smoke/dataset are too slow to instrument)
 add_executable(unit_tests_cov ${UNIT_TEST_SOURCES})
-target_compile_options(unit_tests_cov PRIVATE --coverage -O3 -fno-inline)
+target_compile_options(unit_tests_cov PRIVATE --coverage -O0 -fno-inline)
 target_link_options(unit_tests_cov    PRIVATE --coverage)
 target_link_libraries(unit_tests_cov  PRIVATE myml_lib_cov GTest::gtest_main)
 
-# ──────────────────────────────────────────────────────────────
-# smoke test binaries
-# ──────────────────────────────────────────────────────────────
-
-add_executable(smoke_tests ${SMOKE_TEST_SOURCES})
-target_link_libraries(smoke_tests PRIVATE myml_lib GTest::gtest_main)
-
-add_executable(smoke_tests_cov ${SMOKE_TEST_SOURCES})
-target_compile_options(smoke_tests_cov PRIVATE --coverage -O3 -fno-inline)
-target_link_options(smoke_tests_cov    PRIVATE --coverage)
-target_link_libraries(smoke_tests_cov  PRIVATE myml_lib_cov GTest::gtest_main)
 
 # ──────────────────────────────────────────────────────────────
-# dataset test binaries
-# ──────────────────────────────────────────────────────────────
-
-add_executable(dataset_tests ${DATASET_TEST_SOURCES})
-target_link_libraries(dataset_tests PRIVATE myml_lib GTest::gtest_main)
-
-# ──────────────────────────────────────────────────────────────
-# test discovery
+# Test discovery (CTest)
 # ──────────────────────────────────────────────────────────────
 
 enable_testing()
 include(GoogleTest)
 
-gtest_discover_tests(unit_tests  PROPERTIES LABELS "unit")
-gtest_discover_tests(smoke_tests PROPERTIES LABELS "smoke")
+gtest_discover_tests(unit_tests    PROPERTIES LABELS "unit")
+gtest_discover_tests(smoke_tests   PROPERTIES LABELS "smoke")
 gtest_discover_tests(dataset_tests PROPERTIES LABELS "datasets")
 
 
 # ──────────────────────────────────────────────────────────────
-# Profiling build of main.cpp (gprof)
+# Main training binary
 #
-#   make profile_gprof     [epochs=3]
-#   make profile_gprof_top [epochs=3]
+#   make run_main [mode=debug|opt] [epochs=10]
+# ──────────────────────────────────────────────────────────────
+
+add_executable(debug_main main.cpp)
+target_link_libraries(debug_main PRIVATE myml_lib)
+
+
+# ──────────────────────────────────────────────────────────────
+# Profiling binary (gprof)
+#
+#   make profile_gprof     [profile_epochs=3]
+#   make profile_gprof_top [profile_epochs=3]
 # ──────────────────────────────────────────────────────────────
 
 add_executable(profile_main_gprof main.cpp)
@@ -104,33 +98,18 @@ target_link_libraries(profile_main_gprof  PRIVATE myml_lib)
 
 
 # ──────────────────────────────────────────────────────────────
-# benchmark binaries
+# Benchmark binaries
 #
-# bench_mnist : full MNIST training-loop throughput benchmark
-# bench_ops   : per-op microbenchmark (forward / backward)
-#
-# Both are compiled with -O3 -march=native and kept out of CTest.
-#
-# Run targets (build + execute in one step):
-#
-#   cmake --build build --target run_bench_mnist
-#
-#   cmake --build build --target bench_matmul_forward
-#   cmake --build build --target bench_relu_backward
-#   ... (all 7 ops × 2 modes available)
-#
-# Override size / iterations without touching the source:
-#
-#   cmake -DBENCH_SIZE=1024 -DBENCH_ITERS=20 -DBENCH_WARMUP=5 build
-#   cmake --build build --target bench_matmul_forward
+#   make bench op=matmul mode=forward [size=512] [iters=100] [warmup=10]
+#   make bench_mnist [batches=200] [batch_size=64]
 # ──────────────────────────────────────────────────────────────
 
-set(BENCH_SIZE   "512" CACHE STRING "Primary dimension for bench_ops targets (--size)")
-set(BENCH_ITERS  "100" CACHE STRING "Timed iterations for bench_ops targets (--iters)")
-set(BENCH_WARMUP "10"  CACHE STRING "Warmup iterations for bench_ops targets (--warmup)")
+set(BENCH_SIZE   "512" CACHE STRING "Default --size for bench_ops")
+set(BENCH_ITERS  "100" CACHE STRING "Default --iters for bench_ops")
+set(BENCH_WARMUP "10"  CACHE STRING "Default --warmup for bench_ops")
 
-set(BENCH_MNIST_BATCHES   "200" CACHE STRING "Number of batches for run_bench_mnist (N_BATCHES)")
-set(BENCH_MNIST_BATCHSIZE "64"  CACHE STRING "Batch size for run_bench_mnist (BATCH_SIZE)")
+set(BENCH_MNIST_BATCHES   "200" CACHE STRING "Default N_BATCHES for bench_mnist")
+set(BENCH_MNIST_BATCHSIZE "64"  CACHE STRING "Default BATCH_SIZE for bench_mnist")
 
 add_executable(bench_mnist tests/profiling/bench_mnist.cpp)
 target_compile_options(bench_mnist PRIVATE -O3 -march=native -fno-omit-frame-pointer)
@@ -144,7 +123,6 @@ if(BLAS_FOUND)
     target_link_libraries(bench_ops PRIVATE ${BLAS_LIBRARIES})
 endif()
 
-# Run the full MNIST training-loop benchmark.
 add_custom_target(run_bench_mnist
     COMMAND ${CMAKE_COMMAND} -E env
             N_BATCHES=${BENCH_MNIST_BATCHES}
@@ -155,7 +133,6 @@ add_custom_target(run_bench_mnist
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 
-# Per-op run targets: bench_<op>_<forward|backward>
 foreach(OP matmul mul add relu sigmoid cross_entropy linear)
     foreach(MODE forward backward)
         add_custom_target(bench_${OP}_${MODE}

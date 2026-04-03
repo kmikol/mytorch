@@ -9,7 +9,7 @@
 #include "autograd.h"
 #include "dataset/dataloader.h"
 #include "dataset/mnist_dataset.h"
-#include "layers/linear.h"
+#include "networks/mlp.h"
 #include "loss_functions/cross_entropy.h"
 #include "ops/activations/relu.h"
 #include "optim/sgd.h"
@@ -73,13 +73,10 @@ int main(int argc, char** argv) {
     const size_t input_features = probe_inputs.shape_at(1);
     const size_t num_classes = probe_targets.shape_at(1);
 
-    Linear l1(input_features, 128);
-    Linear l2(128, 64);
-    Linear l3(64, num_classes);
+    const std::vector<size_t> hidden_features = {128, 64};
+    MLP model(input_features, hidden_features, relu, num_classes);
 
-    std::vector<Tensor*> params = l1.parameters();
-    for (Tensor* p : l2.parameters()) params.push_back(p);
-    for (Tensor* p : l3.parameters()) params.push_back(p);
+    std::vector<Tensor*> params = model.parameters();
     SGD optim(params, learning_rate);
 
     std::cout << "Training on full MNIST"
@@ -102,9 +99,7 @@ int main(int argc, char** argv) {
         while (loader.has_next()) {
             auto [inputs, targets] = loader.next_batch();
 
-            Tensor h1     = relu(l1.forward(inputs));
-            Tensor h2     = relu(l2.forward(h1));
-            Tensor logits = l3.forward(h2);
+            Tensor logits = model.forward(inputs);
 
             Tensor loss = cross_entropy(logits, targets);
             epoch_loss_sum += loss(0);
