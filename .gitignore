@@ -1,5 +1,6 @@
 # Build directories
 build/
+build_opt/
 bin/
 lib/
 out/
@@ -60,3 +61,8 @@ Makefile
 # OS files
 .DS_Store
 Thumbs.db
+
+sandbox
+archive
+
+.claude

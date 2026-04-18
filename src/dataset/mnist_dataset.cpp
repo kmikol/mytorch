@@ -1,56 +1,100 @@
-#include "mnist_dataset.h"
+#include "dataset/mnist_dataset.h"
 
-uint32_t MNISTDataset::read_be_uint32(std::ifstream& file)
-{
-    uint32_t v;
-    file.read(reinterpret_cast<char*>(&v), 4);
-    return __builtin_bswap32(v);
+#include <algorithm>
+#include <cassert>
+#include <cstring>
+#include <fstream>
+
+
+static Shape make_shape_2d(size_t d0, size_t d1) {
+    Shape s{};
+    s[0] = d0;
+    s[1] = d1;
+    return s;
 }
 
+
+uint32_t MNISTDataset::read_be_uint32(std::ifstream& file) {
+    unsigned char bytes[4]{};
+    file.read(reinterpret_cast<char*>(bytes), 4);
+    assert(file.good());
+
+    return (static_cast<uint32_t>(bytes[0]) << 24)
+         | (static_cast<uint32_t>(bytes[1]) << 16)
+         | (static_cast<uint32_t>(bytes[2]) << 8)
+         |  static_cast<uint32_t>(bytes[3]);
+}
+
+
 MNISTDataset::MNISTDataset(const std::string& image_file,
-                           const std::string& label_file)
-{
+                           const std::string& label_file) {
     std::ifstream img(image_file, std::ios::binary);
     std::ifstream lbl(label_file, std::ios::binary);
+    assert(img.is_open() && lbl.is_open());
 
-    uint32_t magic  = read_be_uint32(img);
-    uint32_t count  = read_be_uint32(img);
-    uint32_t rows   = read_be_uint32(img);
-    uint32_t cols   = read_be_uint32(img);
+    uint32_t img_magic = read_be_uint32(img);
+    uint32_t img_count = read_be_uint32(img);
+    num_rows = read_be_uint32(img);
+    num_cols = read_be_uint32(img);
 
-    read_be_uint32(lbl);
-    read_be_uint32(lbl);
+    uint32_t lbl_magic = read_be_uint32(lbl);
+    uint32_t lbl_count = read_be_uint32(lbl);
 
-    images.resize(count);
-    labels.resize(count);
+    assert(img_magic == 2051u);
+    assert(lbl_magic == 2049u);
+    assert(img_count == lbl_count);
 
-    for (uint32_t i = 0; i < count; ++i) {
+    images.resize(img_count);
+    labels.resize(img_count);
 
-        images[i].resize(rows * cols);
+    size_t pixels_per_image = static_cast<size_t>(num_rows) * static_cast<size_t>(num_cols);
 
-        for (uint32_t p = 0; p < rows*cols; ++p) {
-            unsigned char pixel;
-            img.read((char*)&pixel,1);
-            images[i][p] = pixel / 255.f;
+    for (uint32_t i = 0; i < img_count; ++i) {
+        images[i].resize(pixels_per_image);
+        for (size_t p = 0; p < pixels_per_image; ++p) {
+            unsigned char pixel = 0;
+            img.read(reinterpret_cast<char*>(&pixel), 1);
+            assert(img.good());
+            images[i][p] = static_cast<float>(pixel) / 255.f;
         }
 
-        lbl.read((char*)&labels[i],1);
+        lbl.read(reinterpret_cast<char*>(&labels[i]), 1);
+        assert(lbl.good());
+        assert(labels[i] < 10);
     }
 }
 
-size_t MNISTDataset::size() const
-{
+
+size_t MNISTDataset::size() const {
     return images.size();
 }
 
-Sample MNISTDataset::get(size_t index) const
-{
-    Tensor input = Tensor::from_data(images[index], {784,1});
 
-    std::vector<float> onehot(10,0.f);
-    onehot[labels[index]] = 1.f;
+Sample MNISTDataset::get(size_t index) const {
+    assert(index < images.size());
 
-    Tensor target = Tensor::from_data(onehot,{10,1});
+    size_t pixels_per_image = static_cast<size_t>(num_rows) * static_cast<size_t>(num_cols);
 
-    return {input,target};
+    Tensor input = Tensor::zeros(make_shape_2d(1, pixels_per_image), 2);
+    for (size_t p = 0; p < pixels_per_image; ++p)
+        input(0, p) = images[index][p];
+
+    Tensor target = Tensor::zeros(make_shape_2d(1, 10), 2);
+    target(0, labels[index]) = 1.f;
+
+    return {input, target};
+}
+
+
+void MNISTDataset::fill_sample(size_t index,
+                               float* input_buf,
+                               float* target_buf) const {
+    assert(index < images.size());
+
+    // Direct copy — no Tensor allocation, no element-wise operator() overhead.
+    std::copy(images[index].begin(), images[index].end(), input_buf);
+
+    // One-hot encode directly into caller's buffer.
+    std::fill(target_buf, target_buf + 10u, 0.f);
+    target_buf[labels[index]] = 1.f;
 }

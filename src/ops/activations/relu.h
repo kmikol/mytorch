@@ -1,56 +1,52 @@
 #pragma once
 
 #include <vector>
-#include "tensorlib.h"
+
+#include "autograd.h"
 
 
-struct ReluOp {
+/**
+ * Element-wise Rectified Linear Unit activation: out = max(0, x).
+ *
+ * The forward and backward passes are separated so each can be tested and
+ * reasoned about independently. Use the free function relu() for the
+ * differentiable version that wires both into the autograd graph.
+ */
+struct ReLUOp {
 
-    static Tensor forward(const Tensor& x) {
-        int64_t rows = x.shape(0), cols = x.shape(1);
-        Tensor out = Tensor::zeros({rows, cols});
-        for (int64_t r = 0; r < rows; r++)
-            for (int64_t c = 0; c < cols; c++)
-                out.at(r,c) = x.at(r,c) > 0.f ? x.at(r,c) : 0.f;
-        return out;
-    }
+    /**
+     * Compute out[i] = max(0, x[i]) element-wise.
+     *
+     * Returns a fresh contiguous tensor of the same shape as x.
+     * Does not touch the autograd graph.
+     */
+    static Tensor forward(const Tensor& x);
 
-    // needs saved_input because we need to know which values were positive
-    // the output alone doesn't tell us — a zero output could mean x was
-    // exactly zero or negative, and the gradient rule is the same for both
-    static std::vector<Tensor> backward(
-        const Tensor& grad,
-        const Tensor& saved_input)
-    {
-        int64_t rows = grad.shape(0), cols = grad.shape(1);
-        Tensor dx = Tensor::zeros({rows, cols});
-        for (int64_t r = 0; r < rows; r++)
-            for (int64_t c = 0; c < cols; c++)
-                // pass gradient through only where input was positive
-                // everywhere else gradient is zero (ReLU was "off")
-                dx.at(r,c) = saved_input.at(r,c) > 0.f ? grad.at(r,c) : 0.f;
-        return {dx};
-    }
+    /**
+     * Compute the input gradient given the upstream gradient.
+     *
+     *   dL/dx[i] = grad[i]  if x[i] > 0
+     *              0         otherwise
+     *
+     * The mask is recomputed from the saved input x rather than stored
+     * separately, keeping memory use minimal.
+     *
+     * @param grad  Upstream gradient (same shape as the forward output).
+     * @param x     Input saved at forward time.
+     * @return      {grad_x} — contiguous, same shape as x.
+     */
+    static Tensor backward(const Tensor& grad, const Tensor& x);
 };
 
-inline Tensor relu(const Tensor& x) {
-    assert(x.ndim() == 2);
 
-    // --- forward ---
-    Tensor out = ReluOp::forward(x);
-
-    // --- backward ---
-    if (!grad_mode_enabled && !x.requires_grad()) return out;
-
-    NoGradGuard no_grad;
-
-    Tensor saved_input = x.clone();
-    out.autograd_meta = make_grad_meta(
-        "relu",
-        {x.autograd_meta},
-        [saved_input](const Tensor& grad) {
-            return ReluOp::backward(grad, saved_input);
-        });
-
-    return out;
-}
+/**
+ * Differentiable ReLU: out = max(0, x).
+ *
+ * Calls ReLUOp::forward for the computation. When x requires a gradient and
+ * grad_mode is enabled, registers a backward node so that backward() can
+ * propagate gradients through this operation.
+ *
+ * x is captured by value (shared storage) inside the backward closure —
+ * no in-place mutations should be made to x after this call.
+ */
+Tensor relu(const Tensor& x);

@@ -1,117 +1,73 @@
 #pragma once
-#include "tensorlib.h"
 
+#include <vector>
+
+#include "autograd.h"
+
+
+/**
+ * Element-wise tensor addition with optional broadcasting.
+ *
+ * Broadcasting rules (numpy-style, restricted to matching ndim):
+ *   - a.ndim == b.ndim is required.
+ *   - For each dimension d, a.shape[d] == b.shape[d]  OR  one of them is 1.
+ *   - The output shape is max(a.shape[d], b.shape[d]) for each d.
+ *
+ * The forward and backward passes are separated so each can be tested and
+ * reasoned about independently. Use the free function add() for the
+ * differentiable version that wires both into the autograd graph.
+ */
 struct AddOp {
 
-    // describes how B was broadcast relative to A
-    // captured at forward time, used in backward
-    struct BroadcastInfo {
-        bool b_broadcast_cols;  // B had 1 col, A had N cols
-        bool a_broadcast_cols;  // A had 1 col, B had N cols
-        // rows must always match — we don't broadcast rows
-    };
+    /**
+     * Compute the element-wise sum with broadcasting: out[...] = a[...] + b[...].
+     *
+     * WHY flat iteration over the output + per-dim index decomposition:
+     *   The output is contiguous, so we iterate its flat indices 0..numel-1.
+     *   We decompose each flat index into per-dim indices using the output's
+     *   contiguous strides, then clamp each dim-index to 0 for any input whose
+     *   shape[d] == 1 (i.e. the broadcast dimension). This is equivalent to
+     *   repeating that input along that dimension without copying data.
+     *
+     * Preconditions (asserted at runtime):
+     *   - a.ndim == b.ndim
+     *   - For all d: a.shape[d] == b.shape[d]  OR  a.shape[d] == 1  OR  b.shape[d] == 1
+     *
+     * Returns a fresh contiguous tensor of the broadcast output shape.
+     * Does not touch the autograd graph.
+     */
+    static Tensor forward(const Tensor& a, const Tensor& b);
 
-    static BroadcastInfo get_broadcast_info(const Tensor& A, const Tensor& B) {
-        assert(A.shape(0) == B.shape(0) &&
-               "add: row count must match");
-        assert((A.shape(1) == B.shape(1) ||
-                A.shape(1) == 1          ||
-                B.shape(1) == 1) &&
-               "add: columns must match or one must be 1");
-
-        BroadcastInfo info;
-        info.b_broadcast_cols = (B.shape(1) == 1 && A.shape(1) > 1);
-        info.a_broadcast_cols = (A.shape(1) == 1 && B.shape(1) > 1);
-        return info;
-    }
-
-    static Tensor forward(const Tensor& A, const Tensor& B) {
-        BroadcastInfo info = get_broadcast_info(A, B);
-
-        // output shape is the larger of the two
-        int64_t rows = A.shape(0);
-        int64_t cols = std::max(A.shape(1), B.shape(1));
-
-        Tensor C = Tensor::zeros({rows, cols});
-
-        for (int64_t r = 0; r < rows; r++) {
-            for (int64_t c = 0; c < cols; c++) {
-                // if A or B is broadcast, always read from column 0
-                int64_t ac = info.a_broadcast_cols ? 0 : c;
-                int64_t bc = info.b_broadcast_cols ? 0 : c;
-                C.at(r, c) = A.at(r, ac) + B.at(r, bc);
-            }
-        }
-
-        return C;
-    }
-
-    static std::vector<Tensor> backward(
-        const Tensor& grad,
-        bool rA, bool rB,
-        BroadcastInfo info,
-        int64_t A_cols, int64_t B_cols)
-    {
-
-        int64_t rows = grad.shape(0);
-        int64_t cols = grad.shape(1);
-
-        std::vector<Tensor> grads(2);
-
-        if (rA) {
-            if (info.a_broadcast_cols) {
-                // A was broadcast — sum gradient back to [rows, 1]
-                Tensor dA = Tensor::zeros({rows, 1});
-                for (int64_t r = 0; r < rows; r++)
-                    for (int64_t c = 0; c < cols; c++)
-                        dA.at(r, 0) += grad.at(r, c);
-                grads[0] = dA;
-            } else {
-                // no broadcast — gradient passes straight through
-                grads[0] = grad.clone();
-            }
-        }
-
-        if (rB) {
-            if (info.b_broadcast_cols) {
-                // B was broadcast — sum gradient back to [rows, 1]
-                // each column of grad contributed to the same B column
-                // so we sum them all together
-                Tensor dB = Tensor::zeros({rows, 1});
-                for (int64_t r = 0; r < rows; r++)
-                    for (int64_t c = 0; c < cols; c++)
-                        dB.at(r, 0) += grad.at(r, c);
-                grads[1] = dB;
-            } else {
-                grads[1] = grad.clone();
-            }
-        }
-
-        return grads;
-    }
+    /**
+     * Compute input gradients given the upstream gradient.
+     *
+     *   dL/da = grad, summed over dimensions where a was broadcast (a.shape[d] == 1)
+     *   dL/db = grad, summed over dimensions where b was broadcast (b.shape[d] == 1)
+     *
+     * WHY summing over broadcast dims:
+     *   Broadcasting repeats the input along a dimension, so multiple output
+     *   positions share the same input element. Their gradients must be
+     *   accumulated (summed) back onto that single input position.
+     *
+     * @param grad  Upstream gradient (same shape as the forward output).
+     * @param a     Left-hand input saved at forward time.
+     * @param b     Right-hand input saved at forward time.
+     * @return      {grad_a, grad_b} — contiguous, same shape as their inputs.
+     */
+    static std::vector<Tensor> backward(const Tensor& grad,
+                                        const Tensor& a,
+                                        const Tensor& b);
 };
 
-inline Tensor add(const Tensor& A, const Tensor& B) {
-    assert(A.ndim() == 2 && B.ndim() == 2);
 
-    AddOp::BroadcastInfo info = AddOp::get_broadcast_info(A, B);
-    Tensor C = AddOp::forward(A, B);
-
-    bool rA = A.requires_grad(), rB = B.requires_grad();
-    if (grad_mode_enabled && (rA || rB)) {
-        NoGradGuard no_grad;
-
-        // no tensors need saving — add backward only needs
-        // the broadcast info and column counts, captured by value
-        int64_t A_cols = A.shape(1), B_cols = B.shape(1);
-
-        C.autograd_meta = make_grad_meta(
-            "add",
-            {A.autograd_meta, B.autograd_meta},
-            [rA, rB, info, A_cols, B_cols](const Tensor& grad) {
-                return AddOp::backward(grad, rA, rB, info, A_cols, B_cols);
-            });
-    }
-
-    return C;
-}
+/**
+ * Differentiable element-wise add with broadcasting: out = a + b.
+ *
+ * Calls AddOp::forward for the computation. When at least one input requires
+ * a gradient and grad_mode is enabled, registers a backward node so that
+ * backward() can propagate gradients through this operation.
+ *
+ * a and b are captured by value (shared storage) inside the backward closure —
+ * no in-place mutations should be made to either tensor after this call.
+ */
+Tensor add(const Tensor& a, const Tensor& b);

@@ -1,81 +1,55 @@
 #pragma once
 
 #include <vector>
-#include "tensorlib.h"
 
+#include "autograd.h"
+
+
+/**
+ * Element-wise tensor multiplication.
+ *
+ * The forward and backward passes are separated so each can be tested and
+ * reasoned about independently. Use the free function mul() for the
+ * differentiable version that wires both into the autograd graph.
+ */
 struct MulOp {
 
-    static Tensor forward(const Tensor& A, const Tensor& B) {
-        int64_t rows = A.shape(0), cols = A.shape(1);
-        Tensor C = Tensor::zeros({rows, cols});
+    /**
+     * Compute the element-wise product: out[i] = a[i] * b[i].
+     *
+     * Preconditions (asserted at runtime):
+     *   - a.ndim == b.ndim
+     *   - a.shape[d] == b.shape[d] for every dimension d
+     *
+     * Returns a fresh contiguous tensor. Does not touch the autograd graph.
+     */
+    static Tensor forward(const Tensor& a, const Tensor& b);
 
-        if (A.is_contiguous() && B.is_contiguous() && C.is_contiguous()) {
-            const float* a = A.implementation->storage->ptr();
-            const float* b = B.implementation->storage->ptr();
-            float*       c = C.implementation->storage->ptr();
-
-            int64_t n = rows * cols;
-            for (int64_t i = 0; i < n; ++i)
-                c[i] = a[i] * b[i];
-        } else {
-            for (int64_t r = 0; r < rows; ++r)
-                for (int64_t c = 0; c < cols; ++c)
-                    C.at(r,c) = A.at(r,c) * B.at(r,c);
-        }
-
-        return C;
-    }
-
-    static std::vector<Tensor> backward(
-        const Tensor& grad,
-        const Tensor& saved_A,
-        const Tensor& saved_B,
-        bool rA, bool rB)
-    {
-        int64_t rows = grad.shape(0), cols = grad.shape(1);
-
-        std::vector<Tensor> grads(2);
-
-        if (rA) {
-            Tensor gA = Tensor::zeros({rows, cols});
-            for (int64_t r = 0; r < rows; ++r)
-                for (int64_t c = 0; c < cols; ++c)
-                    gA.at(r,c) = grad.at(r,c) * saved_B.at(r,c);
-            grads[0] = gA;
-        }
-
-        if (rB) {
-            Tensor gB = Tensor::zeros({rows, cols});
-            for (int64_t r = 0; r < rows; ++r)
-                for (int64_t c = 0; c < cols; ++c)
-                    gB.at(r,c) = grad.at(r,c) * saved_A.at(r,c);
-            grads[1] = gB;
-        }
-
-        return grads;
-    }
+    /**
+     * Compute input gradients given the upstream gradient.
+     *
+     *   dL/da = grad ⊙ b
+     *   dL/db = grad ⊙ a
+     *
+     * @param grad  Upstream gradient (same shape as the forward output).
+     * @param a     Left-hand input saved at forward time.
+     * @param b     Right-hand input saved at forward time.
+     * @return      {grad_a, grad_b} — contiguous, same shape as their inputs.
+     */
+    static std::vector<Tensor> backward(const Tensor& grad,
+                                        const Tensor& a,
+                                        const Tensor& b);
 };
 
-inline Tensor mul(const Tensor& A, const Tensor& B) {
-    assert(A.ndim() == 2 && B.ndim() == 2);
-    assert(A.shape(0) == B.shape(0) && A.shape(1) == B.shape(1));
 
-    Tensor C = MulOp::forward(A, B);
-
-    bool rA = A.requires_grad(), rB = B.requires_grad();
-    if (!grad_mode_enabled || !(rA || rB)) return C;
-
-    NoGradGuard no_grad;
-
-    Tensor sA = A.clone(), sB = B.clone();
-    auto mA = A.autograd_meta, mB = B.autograd_meta;
-
-    C.autograd_meta = make_grad_meta(
-        "mul",
-        {mA, mB},
-        [sA, sB, rA, rB](const Tensor& grad) {
-            return MulOp::backward(grad, sA, sB, rA, rB);
-        });
-
-    return C;
-}
+/**
+ * Differentiable element-wise multiply: out = a * b.
+ *
+ * Calls MulOp::forward for the computation. When at least one input requires
+ * a gradient and grad_mode is enabled, registers a backward node so that
+ * backward() can propagate gradients through this operation.
+ *
+ * a and b are captured by value (shared storage) inside the backward closure —
+ * no in-place mutations should be made to either tensor after this call.
+ */
+Tensor mul(const Tensor& a, const Tensor& b);
